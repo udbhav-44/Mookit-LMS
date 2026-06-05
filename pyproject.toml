@@ -1,0 +1,81 @@
+[project]
+name = "mookit-ai-assistant"
+version = "0.1.0"
+description = "mooKIT AI Assistant for Instructors — Dev A platform layer"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    # Web framework + SSE
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sse-starlette>=3.4",
+    "python-multipart>=0.0.9",
+
+    # HTTP client (async, HTTP/2)
+    "httpx[http2]>=0.27",
+
+    # LLM / AI
+    "openai>=1.35",
+
+    # Settings + validation
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+
+    # Async database
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.29",
+
+    # Redis
+    "redis[hiredis]>=5.0",
+
+    # Background jobs
+    "arq>=0.26",
+
+    # Resilience
+    "tenacity>=8.3",
+    "pybreaker>=1.2",
+
+    # Observability
+    "langfuse>=2.0",
+    "python-json-logger>=2.0",
+    "opentelemetry-api>=1.24",
+    "opentelemetry-sdk>=1.24",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.24",
+    "opentelemetry-instrumentation-fastapi>=0.45b0",
+
+    # File extraction (sandboxed subprocess — libraries available in child process)
+    "pdfminer.six>=20221105",
+    "python-docx>=1.1",
+    "python-pptx>=0.6",
+    "openpyxl>=3.1",
+
+    # File type validation
+    "python-magic>=0.4.27",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",           # for TestClient
+    "pre-commit>=3.7",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
