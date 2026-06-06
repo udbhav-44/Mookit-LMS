@@ -61,15 +61,14 @@ async def chat_endpoint(
     )
 
     audit = getattr(request.app.state, "audit_logger", None)
-    session_store = getattr(request.app.state, "session_store", None)
     orchestrator = getattr(request.app.state, "orchestrator", None)
     ping_interval = settings.limits.sse_ping_interval_seconds
 
     async def event_generator():
         try:
-            # ── Persist the user message ──────────────────────────────────────
-            if session_store:
-                await session_store.append_message(ctx, role="user", content=body.message)
+            # The orchestrator (Dev B) owns transcript persistence (user + assistant turns) via the
+            # session store, so we do NOT append here to avoid a duplicate user message. The stub
+            # path below persists nothing (temporary).
 
             # ── Audit: start ──────────────────────────────────────────────────
             if audit:

@@ -21,7 +21,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from app.contracts import Artifact, RequestContext  # noqa: E402
-
 from app.core.orchestrator import Orchestrator  # noqa: E402
 from app.core.reference_resolver import ReferenceResolver  # noqa: E402
 from app.evals.injection_redteam import DEFAULT_CASES, run_redteam  # noqa: E402

@@ -155,8 +155,21 @@ async def lifespan(app: FastAPI):
     # 9. Audit logger.
     app.state.audit_logger = AuditLogger(app.state.session_factory)
 
-    # 10. Orchestrator seam — Dev B sets app.state.orchestrator to their implementation.
-    app.state.orchestrator = None
+    # 10. Orchestrator seam — Dev B's AI brain wired onto the platform resources above.
+    try:
+        from .core.wiring import build_orchestrator
+        app.state.orchestrator = build_orchestrator(
+            settings=settings,
+            mookit_client=app.state.mookit_client,
+            session_store=app.state.session_store,
+            artifact_registry=app.state.artifact_registry,
+            rag_store=app.state.rag_store,
+            session_factory=app.state.session_factory,
+        )
+        logger.info("Orchestrator (AI brain) wired.")
+    except Exception as exc:
+        logger.warning("Orchestrator wiring failed (chat will use stub): %s", exc)
+        app.state.orchestrator = None
 
     # 11. Observability.
     init_langfuse()
