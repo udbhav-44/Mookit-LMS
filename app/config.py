@@ -1,7 +1,8 @@
 import os
+from typing import Annotated, Any
 
-from pydantic import BaseModel, Field, SecretStr, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 # Bumped whenever the static system prompt / tool-schema preamble changes (cache-busting).
 PROMPT_VERSION = "1"
@@ -47,7 +48,24 @@ class SecurityConfig(BaseModel):
     # between the mooKIT frontend and this service. Empty = disabled (dev only).
     service_api_key: SecretStr = Field(default=SecretStr(""))
     # CORS allowlist for the service-exposed API. Lock to the mooKIT frontend origins in production.
-    allowed_origins: list[str] = Field(default_factory=lambda: ["*"])
+    # Accepts a JSON array (["https://a"]) or a comma-separated string (https://a,https://b).
+    allowed_origins: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["*"])
+
+    @field_validator("allowed_origins", mode="before")
+    @classmethod
+    def _parse_origins(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return ["*"]
+            if s.startswith("["):
+                import json as _json
+                try:
+                    return _json.loads(s)
+                except Exception:
+                    pass
+            return [part.strip() for part in s.split(",") if part.strip()]
+        return v
 
 
 class LimitsConfig(BaseModel):
