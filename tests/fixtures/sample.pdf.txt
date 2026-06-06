@@ -1,0 +1,11 @@
+Photosynthesis is the process by which green plants convert light energy into chemical energy
+stored in glucose. It occurs in the chloroplasts.
+
+The light-dependent reactions take place in the thylakoid membranes and produce ATP and NADPH,
+releasing oxygen as a by-product of splitting water.
+
+The Calvin cycle (light-independent reactions) occurs in the stroma and fixes carbon dioxide into
+glucose using the ATP and NADPH from the light reactions.
+
+Chlorophyll a is the primary pigment that absorbs mostly blue and red light, reflecting green
+light, which gives plants their color.

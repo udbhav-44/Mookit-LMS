@@ -1,15 +1,14 @@
 # 05 — Shared Contracts (the seam between Dev A and Dev B)
 
-These interfaces are **frozen at the end of P0 (CP1)**. Once frozen, Dev A and Dev B build against them
-independently — Dev A tests the full request→mooKIT→confirm→audit path with a *stub tool*; Dev B tests
-the agent + quiz pipeline against a *fake `MooKitClient`* and an *in-memory `SessionStore`*. They only
+These interfaces are **frozen at the end of P0 (CP1)**. Once frozen, Dev A and Dev B build against them  
+independently — Dev A tests the full request→mooKIT→confirm→audit path with a *stub tool*; Dev B tests  
+the agent + quiz pipeline against a *fake `MooKitClient`* and an *in-memory `SessionStore`*. They only  
 meet at these 7 contracts. Put them in a shared package: `app/contracts/`.
-
-> Signatures below are the agreed shape. Field names are normative; types are Python 3.12 + Pydantic v2.
 
 ---
 
 ## Contract 1 — `RequestContext`
+
 Per-request identity + tenancy, populated by Dev A's middleware, read by everyone.
 
 ```python
@@ -25,6 +24,7 @@ class RequestContext(BaseModel):
 ```
 
 ## Contract 2 — `Tool` ABC + `ToolResult` / `ProposedAction`
+
 Dev B authors tools; Dev A's gate + client execute them.
 
 ```python
@@ -55,6 +55,7 @@ class ProposedAction(BaseModel):       # returned by publish tools — NOT execu
 ```
 
 ## Contract 3 — `PreviewRender`
+
 What the UI shows in the confirm dialog. Built by Dev B, rendered by the UI (Dev A wires it).
 
 ```python
@@ -68,6 +69,7 @@ class PreviewRender(BaseModel):
 ```
 
 ## Contract 4 — `SessionStore` + `ArtifactRegistry`
+
 Dev A implements (Redis + Postgres); Dev B consumes. Keyed by `tenant_key` + `session_id`.
 
 ```python
@@ -96,7 +98,8 @@ class Artifact(BaseModel):
 ```
 
 ## Contract 5 — `LLMProvider` ABC
-Dev B implements with OpenAI Responses API. Swappable per spec §12.
+
+Dev B implements with OpenAI Responses API. Swappable per spec .
 
 ```python
 class LLMProvider(ABC):
@@ -110,6 +113,7 @@ class LLMProvider(ABC):
 ```
 
 ## Contract 6 — SSE event schema
+
 The wire format from service → UI. Both devs depend on it.
 
 ```
@@ -123,6 +127,7 @@ event: done                   data: {"response_id": "..."}
 ```
 
 ## Contract 7 — `MooKitClient`
+
 Typed async client over the live mooKIT API. Dev A owns; Dev B calls it from tools.
 
 ```python
@@ -144,7 +149,9 @@ class MooKitClient:
 
 ---
 
-### Stubs to ship at CP1 (so both sides unblock)
+### Stubs to ship at CP1 
+
 - Dev A ships: `FakeMooKitClient` (returns canned objects), real `RequestContext` middleware, in-memory `SessionStore`/`ArtifactRegistry`.
 - Dev B ships: `EchoTool` (read tier), a minimal `OpenAIProvider.respond` that streams, and the system-prompt skeleton.
 - Both: agree on the exact JSON Schema dialect for tool parameters (OpenAI strict mode → all properties `required`, `additionalProperties:false`, optionals modeled as `["type","null"]`).
+

@@ -25,6 +25,7 @@ announcements, and publish lectures — all with human-in-the-loop confirmation.
 |---|---|
 | [dev-a-workplan.md](dev-a-workplan.md) | **Comprehensive work plan for Dev A** — Platform, Integration & Security infra (P0–P5, tasks, acceptance criteria) |
 | [dev-b-workplan.md](dev-b-workplan.md) | **Comprehensive work plan for Dev B** — AI Brain & Domain Logic (P0–P5, tasks, acceptance criteria) |
+| [dev-b-execution-plan.md](dev-b-execution-plan.md) | **Ticket-level execution plan for Dev B** (solo-runnable) — fakes/stubs kit, file paths, signatures, acceptance + tests per ticket, dependency graph |
 | [05-shared-contracts.md](05-shared-contracts.md) | The 7 interfaces both devs build against (frozen at CP1) |
 | [06-work-division.md](06-work-division.md) | One-page ownership map + handoffs |
 | [07-timeline-and-checkpoints.md](07-timeline-and-checkpoints.md) | Parallel phases + integration checkpoints (CP1–CP6) |

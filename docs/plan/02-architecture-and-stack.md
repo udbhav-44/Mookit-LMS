@@ -32,11 +32,15 @@
 ```
 
 **Core idea:** an OpenAI **Responses-API tool-calling loop** where each mooKIT capability is a *tool*.
-Tools are classified **read / draft / publish**. Read & draft tools auto-execute; **publish tools are gated
-behind a deterministic two-phase confirm** (propose → faithful preview → human confirms → non-LLM executor
-calls mooKIT). This satisfies the hard rule that nothing publishes/sends without confirmation.
+Tools are classified **read / draft / publish**.
+
+1.  Read & draft tools auto-execute; 
+2.  **Publish tools are gated behind a deterministic two-phase confirm** (propose → faithful preview → human confirms → non-LLM executor calls mooKIT). 
+
+This satisfies the hard rule that nothing publishes/sends without confirmation.
 
 ## Project structure
+
 ```
 ai-assistant/
 ├─ app/
@@ -67,28 +71,35 @@ ai-assistant/
 ```
 
 ## Tech stack (concrete)
-| Concern | Choice | Notes |
-|---|---|---|
-| Runtime | Python 3.12, FastAPI, uvicorn (+gunicorn worker mgmt) | async throughout |
-| HTTP → mooKIT/LLM | single shared `httpx.AsyncClient` via `lifespan` | `http2=True`, explicit `Limits` + `Timeout(connect=5,read=60,write=10,pool=5)` |
-| LLM | `openai` SDK, **Responses API**; `responses.parse` for strict Structured Outputs | behind `LLMProvider` ABC (swappable per spec §12); prompt caching (static-first, `prompt_cache_key`) |
-| Streaming | `sse-starlette` v3.4.x | `ping≈15s`; abort on `request.is_disconnected()` |
-| Async jobs | **ARQ + Redis** | asyncio-native; separate worker Deployment; progress via Redis → SSE |
-| DB | Postgres, **shared-schema with `tenant_key`** | RLS `FORCE` as safety net; SQLite for dev |
-| Cache/queue/bus | Redis | session cache, job state, **SSE pub/sub backplane**, rate-limit counters |
-| File parsing | pypdf/pdfplumber, python-docx, python-pptx, openpyxl, pandas | magic-byte sniff + sandboxed extraction |
-| Security tooling | OpenAI Guardrails (+ tool guardrails) + Moderation; spotlighting | |
-| Observability | OpenTelemetry GenAI conventions (wrapped) + **Langfuse** | per-tenant token/cost attribution |
-| Resilience | `tenacity` retries, `pybreaker`/`pyresilience` circuit breakers, provider fallback, Redis rate-limit | order: rate-limit → breaker → retry → timeout |
-| Config | `pydantic-settings` v2 + secret manager | per-instance registry table |
-| Sample UI | React (Vite) | chat, file drop, editable quiz preview, audience-chip confirm |
-| Deploy | Docker + compose (dev); stateless pods + HPA, **no sticky sessions** | liveness/readiness/startup probes; proxy buffering off for SSE; **CPU only, no GPU** |
+
+
+| Concern           | Choice                                                                                               | Notes                                                                                                |
+| ----------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Runtime           | Python 3.12, FastAPI, uvicorn (+gunicorn worker mgmt)                                                | async throughout                                                                                     |
+| HTTP → mooKIT/LLM | single shared `httpx.AsyncClient` via `lifespan`                                                     | `http2=True`, explicit `Limits` + `Timeout(connect=5,read=60,write=10,pool=5)`                       |
+| LLM               | `openai` SDK, **Responses API**; `responses.parse` for strict Structured Outputs                     | behind `LLMProvider` ABC (swappable per spec §12); prompt caching (static-first, `prompt_cache_key`) |
+| Streaming         | `sse-starlette` v3.4.x                                                                               | `ping≈15s`; abort on `request.is_disconnected()`                                                     |
+| Async jobs        | **ARQ + Redis**                                                                                      | asyncio-native; separate worker Deployment; progress via Redis → SSE                                 |
+| DB                | Postgres, **shared-schema with `tenant_key`**                                                        | RLS `FORCE` as safety net; SQLite for dev                                                            |
+| Cache/queue/bus   | Redis                                                                                                | session cache, job state, **SSE pub/sub backplane**, rate-limit counters                             |
+| File parsing      | pypdf/pdfplumber, python-docx, python-pptx, openpyxl, pandas                                         | magic-byte sniff + sandboxed extraction                                                              |
+| Security tooling  | OpenAI Guardrails (+ tool guardrails) + Moderation; spotlighting                                     |                                                                                                      |
+| Observability     | OpenTelemetry GenAI conventions (wrapped) + **Langfuse**                                             | per-tenant token/cost attribution                                                                    |
+| Resilience        | `tenacity` retries, `pybreaker`/`pyresilience` circuit breakers, provider fallback, Redis rate-limit | order: rate-limit → breaker → retry → timeout                                                        |
+| Config            | `pydantic-settings` v2 + secret manager                                                              | per-instance registry table                                                                          |
+| Sample UI         | React (Vite)                                                                                         | chat, file drop, editable quiz preview, audience-chip confirm                                        |
+| Deploy            | Docker + compose (dev); stateless pods + HPA, **no sticky sessions**                                 | liveness/readiness/startup probes; proxy buffering off for SSE; **CPU only, no GPU**                 |
+
 
 ## Service-exposed API (our endpoints)
-| Endpoint | Purpose |
-|---|---|
-| `POST /v1/chat` | Conversation turn; SSE stream (assistant tokens, tool progress, `pending_confirmation`) |
-| `POST /v1/files` | Upload → validate → sandboxed-extract → index; returns `fileId` + artifact |
-| `POST /v1/actions/{id}/confirm` · `/reject` | Complete/abort a gated publish action |
-| `GET /v1/sessions/{id}` | Conversation history |
-| `GET /v1/meta` · `/health/{live,ready,startup}` | Instance allowlist/limits; health probes |
+
+
+| Endpoint                                        | Purpose                                                                                 |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `POST /v1/chat`                                 | Conversation turn; SSE stream (assistant tokens, tool progress, `pending_confirmation`) |
+| `POST /v1/files`                                | Upload → validate → sandboxed-extract → index; returns `fileId` + artifact              |
+| `POST /v1/actions/{id}/confirm` · `/reject`     | Complete/abort a gated publish action                                                   |
+| `GET /v1/sessions/{id}`                         | Conversation history                                                                    |
+| `GET /v1/meta` · `/health/{live,ready,startup}` | Instance allowlist/limits; health probes                                                |
+
+
