@@ -81,6 +81,39 @@ def _is_retryable(exc: BaseException) -> bool:
                             httpx.ReadTimeout, httpx.WriteTimeout))
 
 
+# mooKIT's /user_permissions/allowed returns {data:{permissions:{resource:{viewEntity,manageOwn,
+# manageOthers}}}} with int flags. Map that to our action-list PermissionMatrix that the tools use.
+_MANAGE_ACTIONS = ["create", "update", "delete", "publish", "upload", "add", "edit"]
+_VIEW_ACTIONS = ["list", "view", "read"]
+
+
+def _flags_to_actions(flags: dict) -> list[str]:
+    actions: list[str] = []
+    if flags.get("viewEntity"):
+        actions += _VIEW_ACTIONS
+    if flags.get("manageOwn") or flags.get("manageOthers"):
+        actions += _MANAGE_ACTIONS
+    return actions
+
+
+def _to_permission_matrix(data: dict) -> PermissionMatrix:
+    perms = data.get("permissions", data) if isinstance(data, dict) else {}
+    resources: dict[str, list[str]] = {}
+    for resource, flags in perms.items():
+        if isinstance(flags, dict):
+            resources[resource] = _flags_to_actions(flags)
+        elif isinstance(flags, list):  # already action-list shape (e.g. cached/fake)
+            resources[resource] = flags
+    # Our tools authorize against an "assessments" resource; mooKIT splits it into
+    # quizzes/exams/assignments. Aggregate them so a user who can manage any may create assessments.
+    agg: list[str] = []
+    for r in ("quizzes", "exams", "assignments"):
+        agg += resources.get(r, [])
+    if agg:
+        resources.setdefault("assessments", sorted(set(agg)))
+    return PermissionMatrix(resources=resources)
+
+
 class MooKitClient(IMooKitClient):
     """
     Typed async HTTP client for the mooKIT Instructor Express API.
@@ -189,10 +222,7 @@ class MooKitClient(IMooKitClient):
 
     async def get_permissions(self, ctx: RequestContext) -> PermissionMatrix:
         data = await self.call(ctx, "GET", "/user_permissions/allowed")
-        # API returns the resource map directly at the data level
-        if isinstance(data, dict):
-            return PermissionMatrix(resources=data)
-        return PermissionMatrix(resources={})
+        return _to_permission_matrix(data if isinstance(data, dict) else {})
 
     async def list_taxonomy(self, ctx: RequestContext, type: str) -> list[TaxonomyTerm]:
         data = await self.call(ctx, "GET", f"/taxonomies/{type}")
