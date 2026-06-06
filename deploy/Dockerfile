@@ -9,8 +9,11 @@ RUN pip install --no-cache-dir uv
 COPY pyproject.toml ./
 
 # Create a virtual-env inside /build/.venv so we can copy it to the final image.
+# (Resolve runtime deps from pyproject via `uv pip compile`; avoids bash process-substitution,
+# which fails under the /bin/sh used by RUN, and needs no lockfile.)
 RUN uv venv .venv && \
-    uv pip install --python .venv/bin/python --no-cache -r <(uv export --no-dev --no-editable --format requirements-txt)
+    uv pip compile pyproject.toml --output-file /build/requirements.txt && \
+    uv pip install --python .venv/bin/python --no-cache -r /build/requirements.txt
 
 # ── Stage 2: runtime image ────────────────────────────────────────────────────
 FROM python:3.12-slim
