@@ -119,3 +119,25 @@ class InstanceRegistry(Base):
     base_url: Mapped[str] = mapped_column(String(512), nullable=False)
     config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     # config can hold: model override, limits override, retention policy, etc.
+
+
+# pgvector column for RAG embeddings. The `vector` extension must exist (migration creates it).
+from pgvector.sqlalchemy import Vector  # noqa: E402
+
+from .embeddings import EMBED_DIM  # noqa: E402
+
+
+class DocChunk(Base, TenantMixin):
+    """A retrievable, embedded chunk of an uploaded document (RAG store; pgvector backend)."""
+    __tablename__ = "doc_chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    doc_id: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    span: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)      # {start,end} char offsets
+    locator: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)   # {page,para}
+    embedding: Mapped[list[float]] = mapped_column(Vector(EMBED_DIM), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )

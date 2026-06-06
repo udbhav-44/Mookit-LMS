@@ -15,6 +15,7 @@ if TYPE_CHECKING:
         LectureCreate,
         ManagedFile,
         QuestionCreate,
+        SectionCreate,
         TaxonomyTerm,
     )
 
@@ -38,6 +39,9 @@ class MooKitClient(ABC):
 
     @abstractmethod
     async def update_assessment(self, ctx: RequestContext, type: str, assessment_id: int, patch: dict) -> Any: ...
+
+    @abstractmethod
+    async def create_section(self, ctx: RequestContext, type: str, assessment_id: int, body: SectionCreate) -> Any: ...
 
     @abstractmethod
     async def add_question(self, ctx: RequestContext, type: str, assessment_id: int, section_id: int, body: QuestionCreate) -> Any: ...

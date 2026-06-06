@@ -25,6 +25,7 @@ from ..mookit.schemas import (
     AssessmentCreate,
     LectureCreate,
     QuestionCreate,
+    SectionCreate,
 )
 
 # Maps action name → (resource, mooKIT action string) for permission re-validation.
@@ -48,8 +49,9 @@ def _entity_id(result: Any) -> int | None:
 
 
 class DeterministicExecutor:
-    def __init__(self, mookit_client: MooKitClient):
+    def __init__(self, mookit_client: MooKitClient, session_factory=None):
         self.mookit = mookit_client
+        self.session_factory = session_factory  # for resolving stored uploads (FileMeta)
 
     async def execute(self, ctx: RequestContext, action: str, payload: dict) -> Any:
         """Execute a confirmed action against the live mooKIT API. All params come from storage."""
@@ -75,9 +77,15 @@ class DeterministicExecutor:
         assessment_id = _entity_id(created)
 
         if assessment_id is not None:
+            # mooKIT requires questions to live under a section; create one, then add questions to it.
+            section = await self.mookit.create_section(
+                ctx, atype, int(assessment_id),
+                SectionCreate(title=payload.get("section_title", "Questions")),
+            )
+            section_id = _entity_id(section) or 0
             for q in payload.get("questions", []):
                 await self.mookit.add_question(
-                    ctx, atype, int(assessment_id), 0, QuestionCreate(**q)
+                    ctx, atype, int(assessment_id), int(section_id), QuestionCreate(**q)
                 )
             # Publish: flip published.status to 1.
             await self.mookit.update_assessment(
@@ -123,15 +131,51 @@ class DeterministicExecutor:
         body_fields = {
             k: v for k, v in payload.items() if not k.startswith("_") and k != "provenance"
         }
-        resource = payload.get("_resource")
         body = LectureCreate(**body_fields)
         lecture = await self.mookit.create_lecture(ctx, body)
         lecture_id = _entity_id(lecture)
-        if resource and lecture_id is not None:
-            await self.mookit.attach_course_resource(
-                ctx, "lectures", int(lecture_id), [resource]
-            )
+        if lecture_id is None:
+            return lecture
+
+        # Resolve the video resource: either a ready mooKIT fileId (_resource) or a stored upload
+        # (_upload_file_id) that we first push to mooKIT's /files/add to obtain a fileId.
+        resource = payload.get("_resource")
+        if resource is None and payload.get("_upload_file_id"):
+            resource = await self._upload_stored_to_mookit(ctx, str(payload["_upload_file_id"]))
+        if resource:
+            await self.mookit.attach_course_resource(ctx, "lectures", int(lecture_id), [resource])
         return lecture
+
+    async def _upload_stored_to_mookit(self, ctx: RequestContext, our_file_id: str) -> dict | None:
+        """Push a locally-stored uploaded file to mooKIT (/files/add) and return a video resource."""
+        meta = await self._lookup_file_meta(ctx, our_file_id)
+        if meta is None:
+            return None
+        path, filename, mime = meta
+        with open(path, "rb") as f:
+            files = {"files": (filename, f, mime)}
+            managed = await self.mookit.upload_file(ctx, files)
+        if not managed:
+            return None
+        return {"resourceType": "video", "resourceFileId": managed[0].id, "isPrimary": True}
+
+    async def _lookup_file_meta(self, ctx: RequestContext, our_file_id: str):
+        if self.session_factory is None:
+            return None
+        from sqlalchemy import select
+
+        from ..store.db import FileMeta
+        async with self.session_factory() as session:
+            row = (
+                await session.execute(
+                    select(FileMeta).where(
+                        FileMeta.id == our_file_id, FileMeta.tenant_key == ctx.tenant_key
+                    )
+                )
+            ).scalar_one_or_none()
+        if row is None:
+            return None
+        return (row.storage_path, row.filename, row.mime_type)
 
     # ------------------------------------------------------------------
     # File upload (server-side path)

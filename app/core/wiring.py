@@ -12,6 +12,7 @@ from openai import AsyncOpenAI
 from app.config import Settings
 from app.contracts import ProposedAction, RequestContext
 from app.core.confirmation import ConfirmationGate
+from app.core.guardrails import make_openai_guardrail
 from app.core.orchestrator import Orchestrator
 from app.core.reference_resolver import ReferenceResolver
 from app.gen.quiz.generator import OpenAIQuestionGenerator
@@ -33,9 +34,11 @@ def build_orchestrator(
     artifact_registry,
     rag_store,
     session_factory,
+    openai_client=None,
 ) -> Orchestrator:
-    client = AsyncOpenAI(api_key=settings.openai.api_key.get_secret_value())
+    client = openai_client or AsyncOpenAI(api_key=settings.openai.api_key.get_secret_value())
     provider = OpenAIProvider(client, default_model=settings.openai.model)
+    guardrail_hook = make_openai_guardrail(client)
     generator = OpenAIQuestionGenerator(provider, temperature=settings.openai.quiz_temperature)
     pipeline = QuizPipeline(retrieve=rag_store.retrieve, generator=generator)
 
@@ -66,4 +69,5 @@ def build_orchestrator(
         mookit=mookit_client,
         settings=settings,
         proposal_sink=proposal_sink,
+        guardrail_hook=guardrail_hook,
     )

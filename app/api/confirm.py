@@ -54,7 +54,9 @@ async def confirm_action(
     # This catches revocations that happened between proposal and confirmation.
     require_action_permission(ctx, action.action)
 
-    executor = DeterministicExecutor(request.app.state.mookit_client)
+    executor = DeterministicExecutor(
+        request.app.state.mookit_client, session_factory=request.app.state.session_factory
+    )
 
     try:
         result = await executor.execute(ctx, action.action, dict(action.payload))

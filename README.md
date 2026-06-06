@@ -82,13 +82,25 @@ MOOKIT_TOKEN=<jwt> uv run python scripts/probe_mookit.py   # live mooKIT reads (
 with audience chip / diff). Served at `/ui` when the app runs. The richer editable quiz-preview React
 component lives in `sample-ui/quiz-preview/`.
 
+## Production
+No fakes in the runtime path: real OpenAI (chat + quiz + embeddings + Moderation), **pgvector embeddings
+RAG**, real mooKIT writes via the deterministic confirmation executor, Alembic migrations, CORS + a
+frontend↔service shared-secret trust boundary. Full runbook: **`docs/production-setup.md`**.
+
+```bash
+cp .env.example .env   # set OPENAI__API_KEY, MOOKIT__BASE_URL, SECURITY__*, AUTO_CREATE_TABLES=false
+docker compose -f deploy/docker-compose.yml up --build
+alembic upgrade head   # in prod (AUTO_CREATE_TABLES=false); creates pgvector ext + all tables
+```
+
 ## Docs
+- `docs/production-setup.md` (production runbook)
 - `docs/ai-architecture.md` · `docs/demo-script.md` · `docs/prompt-library.md` · `docs/eval-report.md`
 - `docs/plan/` — overview, the 7 shared contracts, both dev work plans, the Dev B execution plan,
   the mooKIT API reference, research synthesis.
 
 ## Status
-- 154 offline tests green; ruff + mypy clean (Python 3.10+).
+- 159 offline tests green; ruff + mypy clean (Python 3.10+).
 - `/v1/chat` streams the orchestrator end-to-end (verified with `tests/api/test_chat_sse.py`).
 - Injection red-team: **0 unconfirmed actions** (`app/evals/injection_redteam.py`).
 - Live mooKIT writes wired through the executor; verify on the IITK network with `scripts/probe_mookit.py`

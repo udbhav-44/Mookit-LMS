@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.contracts import RequestContext  # noqa: E402
 from app.mookit.client import MooKitClient  # noqa: E402
 
-BASE_URL = os.getenv("MOOKIT_BASE_URL", "https://test.mookit.in/api")
+BASE_URL = os.getenv("MOOKIT_BASE_URL", "https://test.mookit.in/v2/api")
 COURSE = os.getenv("MOOKIT_COURSE", "coursetest")
 UID = os.getenv("MOOKIT_UID", "1")
 TOKEN = os.getenv("MOOKIT_TOKEN", "")

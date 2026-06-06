@@ -33,8 +33,9 @@ async def test_assessment_flow(ctx) -> None:
     assert mookit.write_calls == []
     action_id = harness.propose(ctx, proposal)
     await harness.confirm(action_id, current_hash=proposal.content_hash)
-    # exactly one assessment created + its questions
+    # exactly one assessment created, a section, then its questions added under that section
     assert mookit.write_calls.count("create_assessment") == 1
+    assert mookit.write_calls.count("create_section") == 1
     assert mookit.write_calls.count("add_question") == 2
 
 

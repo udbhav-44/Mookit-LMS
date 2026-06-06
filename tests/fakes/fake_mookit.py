@@ -45,6 +45,7 @@ _TAXONOMY: dict[str, list[TaxonomyTerm]] = {
 _WRITE_METHODS = {
     "create_assessment",
     "update_assessment",
+    "create_section",
     "add_question",
     "create_announcement",
     "update_announcement",
@@ -90,6 +91,10 @@ class FakeMooKitClient(MooKitClient):
     async def update_assessment(self, ctx: RequestContext, type: str, assessment_id: int, patch: dict) -> Any:
         self._record("update_assessment", type=type, assessment_id=assessment_id, patch=patch)
         return {"id": assessment_id, **patch}
+
+    async def create_section(self, ctx, type, assessment_id, body) -> Any:
+        self._record("create_section", type=type, assessment_id=assessment_id, body=body)
+        return {"id": self._mint(), "title": getattr(body, "title", "Section")}
 
     async def add_question(self, ctx, type, assessment_id, section_id, body: QuestionCreate) -> Any:
         self._record("add_question", type=type, assessment_id=assessment_id, section_id=section_id, body=body)

@@ -11,7 +11,7 @@ outputs (P2) already shrink the injection surface.
 from __future__ import annotations
 
 import re
-from typing import Protocol
+from typing import Any, Protocol
 
 from pydantic import BaseModel
 
@@ -57,3 +57,32 @@ async def screen_tool_output(text: str, *, hook: GuardrailHook | None = None) ->
     if hook is not None:
         return await hook(text)
     return _heuristic_screen(text)
+
+
+def make_openai_guardrail(client: Any, *, model: str = "omni-moderation-latest") -> GuardrailHook:
+    """Production guardrail hook: OpenAI Moderation (hard block) + injection heuristics (flag).
+
+    Moderation flags hate/violence/self-harm/sexual/etc. → blocks. The injection heuristics flag
+    prompt-injection patterns (advisory; the confirmation gate + server-side targets are the real
+    backstop). Fails open on API error (never crash the chat), recording a 'moderation_unavailable' flag.
+    """
+
+    async def _hook(text: str) -> GuardrailResult:
+        flags: list[str] = list(_heuristic_screen(text).flags)
+        allowed = True
+        try:
+            resp = await client.moderations.create(model=model, input=text[:8000])
+            result = resp.results[0] if getattr(resp, "results", None) else None
+            if result is not None and getattr(result, "flagged", False):
+                allowed = False
+                cats = getattr(result, "categories", None)
+                if cats is not None:
+                    data = cats.model_dump() if hasattr(cats, "model_dump") else dict(cats)
+                    flags += [f"moderation:{k}" for k, v in data.items() if v]
+                else:
+                    flags.append("moderation:flagged")
+        except Exception:  # noqa: BLE001 — never block the chat on a moderation outage
+            flags.append("moderation_unavailable")
+        return GuardrailResult(allowed=allowed, flags=flags)
+
+    return _hook

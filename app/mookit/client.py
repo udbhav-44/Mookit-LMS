@@ -27,6 +27,7 @@ from .schemas import (
     LectureCreate,
     ManagedFile,
     QuestionCreate,
+    SectionCreate,
     TaxonomyTerm,
     UserMe,
 )
@@ -113,9 +114,16 @@ class MooKitClient(IMooKitClient):
         params: dict | None = None,
         files: dict | None = None,
     ) -> Any:
-        """Send a request to mooKIT, unwrap the envelope, raise typed errors."""
-        base_url = self._base_url_resolver(ctx.instance_id)
-        url = f"{base_url}{path}"
+        """Send a request to mooKIT, unwrap the envelope, raise typed errors.
+
+        URL scheme: {base_url}/{course}{path}, e.g.
+            https://test.mookit.in/v2/api / coursetest / /users/me
+        The course short-name is part of the path (course-scoped routing); it is also sent as a header.
+        """
+        base_url = self._base_url_resolver(ctx.instance_id).rstrip("/")
+        course = ctx.course_id or ctx.forwarded_headers.get("course", "")
+        norm_path = path if path.startswith("/") else f"/{path}"
+        url = f"{base_url}/{course}{norm_path}"
         headers = {
             "course": ctx.forwarded_headers.get("course", ""),
             "token": ctx.forwarded_headers.get("token", ""),
@@ -206,6 +214,12 @@ class MooKitClient(IMooKitClient):
 
     async def update_assessment(self, ctx: RequestContext, type: str, assessment_id: int, patch: dict) -> Any:
         return await self.call(ctx, "PUT", f"/assessments/{type}/{assessment_id}", json=patch)
+
+    async def create_section(
+        self, ctx: RequestContext, type: str, assessment_id: int, body: SectionCreate
+    ) -> Any:
+        path = f"/assessments/{type}/{assessment_id}/sections"
+        return await self.call(ctx, "POST", path, json=body.model_dump(exclude_none=True))
 
     async def add_question(
         self,
@@ -302,6 +316,9 @@ class FakeMooKitClient(IMooKitClient):
 
     async def update_assessment(self, ctx: RequestContext, type: str, assessment_id: int, patch: dict) -> Any:
         return {"id": assessment_id, **patch}
+
+    async def create_section(self, ctx: RequestContext, type: str, assessment_id: int, body) -> Any:
+        return {"id": 321, "title": getattr(body, "title", "Section")}
 
     async def add_question(self, ctx: RequestContext, type: str, assessment_id: int,
                            section_id: int, body: QuestionCreate) -> Any:

@@ -119,11 +119,16 @@ class PublishLectureTool(Tool):
         }
         file_id = d.get("file_mookit_id")
         if file_id is not None:
+            # A mooKIT fileId is already known — attach directly.
             payload["_resource"] = {
                 "resourceType": "video",
                 "resourceFileId": int(file_id),
                 "isPrimary": True,
             }
+        elif d.get("file_artifact_id"):
+            # Only our local upload id is known — the executor uploads it to mooKIT at confirm time
+            # (server-side) to obtain the fileId, then attaches it as the primary video resource.
+            payload["_upload_file_id"] = d["file_artifact_id"]
         preview = build_lecture_preview(
             title=d["title"],
             week_label=d.get("week_label", ""),

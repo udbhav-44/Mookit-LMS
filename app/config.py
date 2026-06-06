@@ -23,10 +23,13 @@ class OpenAIConfig(BaseModel):
     fast_model: str = "gpt-4o-mini"          # cheaper model for routing/extraction
     quiz_temperature: float = 0.9            # diversity for generation
     deterministic_temperature: float = 0.0   # evals / snapshots
+    embed_model: str = "text-embedding-3-small"
+    embed_dim: int = 1536
 
 
 class MooKitConfig(BaseModel):
-    base_url: str = "https://test.mookit.in/api"
+    # The course short-name is appended per-request: {base_url}/{course}/{endpoint}
+    base_url: str = "https://test.mookit.in/v2/api"
     timeout_connect: float = 5.0
     timeout_read: float = 60.0
     timeout_write: float = 10.0
@@ -40,6 +43,11 @@ class SecurityConfig(BaseModel):
     # Must be at least 32 chars in production; override via env SECURITY__SECRET_KEY
     secret_key: SecretStr = Field(default=SecretStr("dev-secret-key-CHANGE-IN-PRODUCTION-32c"))
     confirm_token_ttl_seconds: int = 3600  # 1 hour before a pending confirmation expires
+    # If set, every request must carry header `x-service-key` matching this value — the trust boundary
+    # between the mooKIT frontend and this service. Empty = disabled (dev only).
+    service_api_key: SecretStr = Field(default=SecretStr(""))
+    # CORS allowlist for the service-exposed API. Lock to the mooKIT frontend origins in production.
+    allowed_origins: list[str] = Field(default_factory=lambda: ["*"])
 
 
 class LimitsConfig(BaseModel):
@@ -70,6 +78,10 @@ class Settings(BaseSettings):
 
     app_name: str = "mooKIT AI Assistant"
     debug: bool = False
+    rag_backend: str = "pgvector"  # "pgvector" (embeddings) | "keyword" (Redis term-overlap fallback)
+    # Create tables on startup (convenient for dev/out-of-box). Set False in prod and run
+    # `alembic upgrade head` instead.
+    auto_create_tables: bool = True
 
     db: DatabaseConfig = Field(default_factory=DatabaseConfig)
     redis: RedisConfig = Field(default_factory=RedisConfig)

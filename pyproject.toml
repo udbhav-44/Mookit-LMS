@@ -24,9 +24,13 @@ dependencies = [
     # Async database
     "sqlalchemy[asyncio]>=2.0",
     "asyncpg>=0.29",
+    "alembic>=1.13",
 
     # Redis
     "redis[hiredis]>=5.0",
+
+    # Vector search (RAG embeddings in Postgres)
+    "pgvector>=0.3",
 
     # Background jobs
     "arq>=0.26",

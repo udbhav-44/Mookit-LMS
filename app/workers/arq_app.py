@@ -28,7 +28,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from ..config import settings
 from ..files.sandbox import ExtractionError, ExtractionSandbox
 from ..store.db import FileMeta
-from ..store.rag_store import RAGStore
 
 logger = logging.getLogger(__name__)
 
@@ -91,8 +90,14 @@ async def extract_and_index_file(
     min_ctx = _MinCtx()
     min_ctx.tenant_key = tenant_key  # type: ignore[attr-defined]
 
-    rag = RAGStore(redis)
-    chunks = RAGStore.chunk_text(text)
+    from ..store.rag_factory import make_rag_store
+    rag = make_rag_store(
+        settings,
+        redis=redis,
+        session_factory=ctx.get("session_factory"),
+        openai_client=ctx.get("openai_client"),
+    )
+    chunks = rag.chunk_text(text)
     await rag.store_chunks(min_ctx, file_id, chunks)  # type: ignore[arg-type]
     await rag.save_metadata(min_ctx, file_id, {  # type: ignore[arg-type]
         "filename": file_path.split("/")[-1],
@@ -202,6 +207,8 @@ async def startup(ctx: dict) -> None:
     engine = create_async_engine(settings.db.url, pool_size=5, max_overflow=5)
     ctx["db_engine"] = engine
     ctx["session_factory"] = async_sessionmaker(engine, expire_on_commit=False)
+    from openai import AsyncOpenAI
+    ctx["openai_client"] = AsyncOpenAI(api_key=settings.openai.api_key.get_secret_value())
     logger.info("ARQ worker started")
 
 

@@ -33,7 +33,7 @@ from app.contracts import (
     SessionStore,
     ToolResult,
 )
-from app.core.guardrails import screen_tool_output
+from app.core.guardrails import screen_input, screen_tool_output
 from app.core.memory import TranscriptManager
 from app.core.prompts import SYSTEM_PROMPT, build_input
 from app.core.prompts.assembly import prompt_cache_key
@@ -101,6 +101,18 @@ class Orchestrator:
     async def run_turn(
         self, ctx: RequestContext, user_text: str
     ) -> AsyncIterator[OrchestratorEvent]:
+        # Guardrail screen on the user input. A blocking hook (e.g. moderation) stops the turn;
+        # flags-only results are advisory (the confirmation gate remains the real backstop).
+        gr = await screen_input(user_text, hook=self._guardrail_hook)
+        if gr.blocked:
+            yield OrchestratorEvent(
+                event="error",
+                data={"code": "input_blocked", "message": "Input flagged by content moderation.",
+                      "retryable": False, "flags": gr.flags},
+            )
+            yield OrchestratorEvent(event="done", data={"response_id": ""})
+            return
+
         await self._sessions.append_message(ctx, "user", user_text)
         await self._transcript.maybe_compact(ctx)
 

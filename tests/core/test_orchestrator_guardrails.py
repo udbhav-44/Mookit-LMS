@@ -6,7 +6,7 @@ from app.contracts import RequestContext, Tool, ToolResult
 from app.core.orchestrator import Orchestrator
 from app.core.reference_resolver import ReferenceResolver
 from app.llm.schema import strict_schema
-from app.tools.echo import EchoArgs
+from app.tools.echo import EchoArgs, EchoTool
 from app.tools.registry import ToolRegistry
 from tests.core.scripted_llm import ScriptedLLM, prose_round, tool_round
 from tests.fakes.fake_mookit import FakeMooKitClient
@@ -56,3 +56,29 @@ async def test_tool_output_flagged(ctx: RequestContext) -> None:
     assert fn_outputs
     parsed = json.loads(fn_outputs[0]["output"])
     assert parsed.get("_guardrail_flags")
+
+
+async def test_blocking_hook_stops_turn(ctx: RequestContext) -> None:
+    from app.core.guardrails import GuardrailResult
+
+    async def blocking_hook(text: str) -> GuardrailResult:
+        return GuardrailResult(allowed=False, flags=["moderation:hate"])
+
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+    artifacts = InMemoryArtifactRegistry()
+    sessions = InMemorySessionStore()
+    llm = ScriptedLLM([prose_round("should not run", response_id="r1")])
+    orch = Orchestrator(
+        llm=llm, registry=registry, sessions=sessions, artifacts=artifacts,
+        resolver=ReferenceResolver(artifacts), mookit=FakeMooKitClient(),
+        guardrail_hook=blocking_hook,
+    )
+    events = [e async for e in orch.run_turn(ctx, "something harmful")]
+    kinds = [e.event for e in events]
+    assert "error" in kinds
+    err = next(e for e in events if e.event == "error")
+    assert err.data["code"] == "input_blocked"
+    assert llm.calls == []  # model was never called
+    # nothing persisted
+    assert await sessions.get_transcript(ctx, max_tokens=1000) == []

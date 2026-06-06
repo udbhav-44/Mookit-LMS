@@ -42,7 +42,6 @@ from .mookit.client import MooKitClient
 from .obs.logging import setup_logging
 from .obs.tracing import init_langfuse, init_otel
 from .store.durable_artifact_registry import DurableArtifactRegistry
-from .store.rag_store import RAGStore
 from .store.redis_store import RedisSessionStore
 
 setup_logging()
@@ -121,14 +120,23 @@ async def lifespan(app: FastAPI):
         app.state.db_engine, expire_on_commit=False
     )
 
-    # Create tables if absent (idempotent) so the stack runs out-of-the-box.
-    try:
+    # Create tables if absent (idempotent) so the stack runs out-of-the-box. In production set
+    # AUTO_CREATE_TABLES=false and run `alembic upgrade head`.
+    if settings.auto_create_tables:
+        from sqlalchemy import text
+
         from .store.db import Base
-        async with app.state.db_engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database schema ensured.")
-    except Exception as exc:
-        logger.warning("DB schema init skipped/failed: %s", exc)
+        try:
+            async with app.state.db_engine.begin() as conn:
+                # pgvector extension for the doc_chunks embedding column.
+                try:
+                    await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+                except Exception as exc:
+                    logger.warning("Could not ensure pgvector extension: %s", exc)
+                await conn.run_sync(Base.metadata.create_all)
+            logger.info("Database schema ensured.")
+        except Exception as exc:
+            logger.warning("DB schema init skipped/failed: %s", exc)
 
     # 4. ARQ job queue.
     try:
@@ -158,8 +166,17 @@ async def lifespan(app: FastAPI):
         redis=app.state.redis,
     )
 
-    # 8. RAG store.
-    app.state.rag_store = RAGStore(app.state.redis)
+    # 8. Shared OpenAI client + RAG store (pgvector embeddings, or keyword fallback).
+    from openai import AsyncOpenAI
+
+    from .store.rag_factory import make_rag_store
+    app.state.openai_client = AsyncOpenAI(api_key=settings.openai.api_key.get_secret_value())
+    app.state.rag_store = make_rag_store(
+        settings,
+        redis=app.state.redis,
+        session_factory=app.state.session_factory,
+        openai_client=app.state.openai_client,
+    )
 
     # 9. Audit logger.
     app.state.audit_logger = AuditLogger(app.state.session_factory)
@@ -174,6 +191,7 @@ async def lifespan(app: FastAPI):
             artifact_registry=app.state.artifact_registry,
             rag_store=app.state.rag_store,
             session_factory=app.state.session_factory,
+            openai_client=app.state.openai_client,
         )
         logger.info("Orchestrator (AI brain) wired.")
     except Exception as exc:
@@ -209,11 +227,30 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],          # tighten in production via env / config
+    allow_origins=settings.security.allowed_origins,  # lock to mooKIT frontend origins in prod
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def _service_key_guard(request: Request, call_next):
+    """Trust boundary: if SECURITY__SERVICE_API_KEY is set, require a matching x-service-key header.
+
+    Health checks, docs, and the sample UI are exempt so probes and demos still work.
+    """
+    import secrets as _secrets
+
+    expected = settings.security.service_api_key.get_secret_value()
+    path = request.url.path
+    exempt = path.startswith(("/health", "/docs", "/redoc", "/openapi", "/ui")) or path == "/"
+    if expected and not exempt:
+        provided = request.headers.get("x-service-key", "")
+        if not _secrets.compare_digest(provided, expected):
+            return JSONResponse(status_code=401, content={"success": False,
+                                "error": {"code": 401, "message": "Invalid or missing service key"}})
+    return await call_next(request)
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 
