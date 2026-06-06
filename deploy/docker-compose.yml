@@ -1,0 +1,93 @@
+services:
+
+  # ── mooKIT AI Assistant API ──────────────────────────────────────────────────
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      DB__URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/mookit_lms"
+      REDIS__URL: "redis://redis:6379/0"
+      OPENAI__API_KEY: "${OPENAI__API_KEY:-sk-placeholder}"
+      MOOKIT__BASE_URL: "${MOOKIT__BASE_URL:-https://test.mookit.in/api}"
+      SECURITY__SECRET_KEY: "${SECURITY__SECRET_KEY:-dev-secret-key-CHANGE-IN-PRODUCTION-32c}"
+      LIMITS__UPLOAD_DIR: "/tmp/mookit_uploads"
+      DEBUG: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - uploads:/tmp/mookit_uploads
+    restart: unless-stopped
+    # Stateless — scale horizontally; Redis pub/sub backplane handles SSE fan-out.
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── ARQ background worker ────────────────────────────────────────────────────
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["python", "-m", "arq", "app.workers.arq_app.WorkerSettings"]
+    environment:
+      DB__URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/mookit_lms"
+      REDIS__URL: "redis://redis:6379/0"
+      OPENAI__API_KEY: "${OPENAI__API_KEY:-sk-placeholder}"
+      MOOKIT__BASE_URL: "${MOOKIT__BASE_URL:-https://test.mookit.in/api}"
+      SECURITY__SECRET_KEY: "${SECURITY__SECRET_KEY:-dev-secret-key-CHANGE-IN-PRODUCTION-32c}"
+      LIMITS__UPLOAD_DIR: "/tmp/mookit_uploads"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - uploads:/tmp/mookit_uploads
+    restart: unless-stopped
+
+  # ── Postgres ─────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: mookit_lms
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ── Redis ─────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:

@@ -1,33 +1,85 @@
-"""Configuration for the AI-side (Dev B). Dev A owns the full runtime settings;
-this is the subset the brain + quiz pipeline need to run solo.
-"""
-
-from __future__ import annotations
-
-from pydantic import Field
+from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Bumped whenever the static system prompt / tool-schema preamble changes (cache-busting).
 PROMPT_VERSION = "1"
-"""Bumped whenever the static system prompt / tool-schema preamble changes (cache-busting)."""
 
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="", extra="ignore")
+class DatabaseConfig(BaseModel):
+    url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/mookit_lms"
+    pool_size: int = 20
+    max_overflow: int = 10
 
-    openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
 
-    # Default model for chat/tool-calling; cheaper model for routing/extraction.
-    default_model: str = "gpt-4o"
-    fast_model: str = "gpt-4o-mini"
+class RedisConfig(BaseModel):
+    url: str = "redis://localhost:6379/0"
 
-    # Generation defaults.
-    quiz_temperature: float = 0.9
-    deterministic_temperature: float = 0.0
 
-    # Memory.
+class OpenAIConfig(BaseModel):
+    api_key: SecretStr = Field(default=SecretStr("sk-placeholder"))
+    model: str = "gpt-4o"
+    fast_model: str = "gpt-4o-mini"          # cheaper model for routing/extraction
+    quiz_temperature: float = 0.9            # diversity for generation
+    deterministic_temperature: float = 0.0   # evals / snapshots
+
+
+class MooKitConfig(BaseModel):
+    base_url: str = "https://test.mookit.in/api"
+    timeout_connect: float = 5.0
+    timeout_read: float = 60.0
+    timeout_write: float = 10.0
+    timeout_pool: float = 5.0
+    max_retries: int = 3
+    circuit_breaker_fail_max: int = 5
+    circuit_breaker_reset_seconds: float = 30.0
+
+
+class SecurityConfig(BaseModel):
+    # Must be at least 32 chars in production; override via env SECURITY__SECRET_KEY
+    secret_key: SecretStr = Field(default=SecretStr("dev-secret-key-CHANGE-IN-PRODUCTION-32c"))
+    confirm_token_ttl_seconds: int = 3600  # 1 hour before a pending confirmation expires
+
+
+class LimitsConfig(BaseModel):
+    max_file_size_bytes: int = 10 * 1024 * 1024   # 10 MB
+    max_file_pages: int = 200
+    max_messages_per_session: int = 100
+    max_context_tokens: int = 8000
+    rate_limit_rpm: int = 60          # requests per minute per tenant
+    sse_ping_interval_seconds: float = 15.0
+    upload_dir: str = "/tmp/mookit_uploads"
+    max_zip_expansion_ratio: int = 100           # zip-bomb guard
+    max_zip_uncompressed_bytes: int = 50 * 1024 * 1024  # 50 MB uncompressed cap
+
+
+class MemoryConfig(BaseModel):
+    """Dev B two-channel memory knobs (transcript compaction)."""
     transcript_max_tokens: int = 6000
     transcript_keep_recent: int = 8
 
 
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        env_nested_delimiter="__",
+    )
+
+    app_name: str = "mooKIT AI Assistant"
+    debug: bool = False
+
+    db: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    redis: RedisConfig = Field(default_factory=RedisConfig)
+    openai: OpenAIConfig = Field(default_factory=OpenAIConfig)
+    mookit: MooKitConfig = Field(default_factory=MooKitConfig)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
+    limits: LimitsConfig = Field(default_factory=LimitsConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
+
+
+settings = Settings()
+
+
 def get_settings() -> Settings:
-    return Settings()
+    return settings

@@ -1,71 +1,25 @@
-"""Shared contracts package — the 7 frozen interfaces (co-owned with Dev A)."""
-
-from app.contracts.mookit import (
-    Announcement,
-    Assessment,
-    CourseResource,
-    Lecture,
-    ManagedFile,
-    MooKitClient,
-    Question,
-    TaxonomyTerm,
-    User,
-)
-from app.contracts.types import (
-    Artifact,
-    ArtifactRegistry,
-    ArtifactType,
-    AssistantDelta,
-    ErrorEvent,
-    ErrorInfo,
-    LLMEvent,
-    LLMProvider,
-    Message,
-    PermissionMatrix,
-    PreviewRender,
-    ProposedAction,
-    RequestContext,
-    ResponseCompleted,
-    RiskTier,
-    SessionStore,
-    Tool,
-    ToolCallArgsDelta,
-    ToolCallArgsDone,
-    ToolCallStarted,
-    ToolResult,
-)
+from .context import RequestContext, PermissionMatrix
+from .tools import Tool, ToolResult, ProposedAction, RiskTier
+from .preview import PreviewRender
+from .stores import SessionStore, ArtifactRegistry, Artifact, Message
+from .llm import LLMProvider, LLMEvent
+from .mookit import MooKitClient
+from .errors import ErrorInfo
 
 __all__ = [
-    # types
-    "Artifact",
-    "ArtifactRegistry",
-    "ArtifactType",
-    "AssistantDelta",
-    "ErrorEvent",
-    "ErrorInfo",
-    "LLMEvent",
-    "LLMProvider",
-    "Message",
-    "PermissionMatrix",
-    "PreviewRender",
-    "ProposedAction",
     "RequestContext",
-    "ResponseCompleted",
-    "RiskTier",
-    "SessionStore",
+    "PermissionMatrix",
     "Tool",
-    "ToolCallArgsDelta",
-    "ToolCallArgsDone",
-    "ToolCallStarted",
     "ToolResult",
-    # mookit
-    "Announcement",
-    "Assessment",
-    "CourseResource",
-    "Lecture",
-    "ManagedFile",
+    "ProposedAction",
+    "RiskTier",
+    "PreviewRender",
+    "SessionStore",
+    "ArtifactRegistry",
+    "Artifact",
+    "Message",
+    "LLMProvider",
+    "LLMEvent",
     "MooKitClient",
-    "Question",
-    "TaxonomyTerm",
-    "User",
+    "ErrorInfo",
 ]
