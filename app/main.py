@@ -33,19 +33,17 @@ from arq.connections import RedisSettings
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from .config import settings
-from .api import chat, health, sessions, files, confirm, meta
+from .api import chat, confirm, files, health, meta, sessions
 from .audit.logger import AuditLogger
+from .config import settings
 from .mookit.client import MooKitClient
 from .obs.logging import setup_logging
 from .obs.tracing import init_langfuse, init_otel
-from .store.artifact_registry import ArtifactRegistry
 from .store.durable_artifact_registry import DurableArtifactRegistry
 from .store.rag_store import RAGStore
 from .store.redis_store import RedisSessionStore
-from .store.session_store import SessionStore
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -67,6 +65,7 @@ def _make_base_url_resolver(session_factory, default_base_url: str):
             return _instance_url_cache[instance_id]
         try:
             from sqlalchemy import select
+
             from .store.db import InstanceRegistry
             async with session_factory() as db:
                 result = await db.execute(

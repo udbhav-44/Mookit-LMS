@@ -14,8 +14,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from app.contracts import RequestContext, Tool, ToolResult
 from app.contracts.mookit import MooKitClient
-from app.contracts.types import RequestContext, Tool, ToolResult
 from app.llm.schema import strict_schema
 
 
@@ -33,7 +33,7 @@ class WhoAmITool(Tool):
         self._mookit = mookit
 
     async def run(self, ctx: RequestContext, args: dict[str, Any]) -> ToolResult:
-        user = await self._mookit.whoami(ctx)
+        user = await self._mookit.users_me(ctx)
         return ToolResult(ok=True, data=user.model_dump())
 
 
@@ -57,15 +57,15 @@ class ResolveTaxonomyTool(Tool):
     async def run(self, ctx: RequestContext, args: dict[str, Any]) -> ToolResult:
         parsed = ResolveTaxonomyArgs.model_validate(args)
         terms = await self._mookit.list_taxonomy(ctx, parsed.type)
-        candidates = [{"id": t.id, "title": t.title} for t in terms]
+        candidates = [{"id": t.id, "title": t.name} for t in terms]
         target = _normalize(parsed.label)
-        exact = [t for t in terms if _normalize(t.title) == target]
+        exact = [t for t in terms if _normalize(t.name) == target]
         matched = exact[0].id if exact else None
         return ToolResult(
             ok=True,
             data={
                 "matched": matched,
-                "matched_title": exact[0].title if exact else None,
+                "matched_title": exact[0].name if exact else None,
                 "candidates": candidates,
             },
             message=(
@@ -83,7 +83,7 @@ class PermissionIntrospectTool(Tool):
     parameters_schema = strict_schema(_NoArgs)
 
     async def run(self, ctx: RequestContext, args: dict[str, Any]) -> ToolResult:
-        return ToolResult(ok=True, data=ctx.permissions.allowed)
+        return ToolResult(ok=True, data=ctx.permissions.resources)
 
 
 def _normalize(s: str) -> str:

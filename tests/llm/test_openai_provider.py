@@ -1,18 +1,15 @@
-"""B0.2 acceptance — event translation (prose + tool-call turns), refusal, truncation."""
+"""OpenAIProvider acceptance — event translation (prose + tool-call), refusal, truncation.
+
+Asserts the canonical generic LLMEvent(event_type, data) stream.
+"""
 
 from types import SimpleNamespace
 
 import pytest
 from pydantic import BaseModel
 
-from app.contracts.types import (
-    AssistantDelta,
-    ResponseCompleted,
-    ToolCallArgsDone,
-    ToolCallStarted,
-)
 from app.llm.events import ModelRefusal, OutputTruncated
-from app.llm.openai_provider import OpenAIProvider, StreamTranslator
+from app.llm.openai import OpenAIProvider, StreamTranslator
 from tests.llm.fake_openai import (
     FakeOpenAIClient,
     args_delta,
@@ -24,16 +21,17 @@ from tests.llm.fake_openai import (
 
 
 async def _collect(provider: OpenAIProvider, **kwargs) -> list:
-    return [e async for e in provider.respond(instructions="sys", input=[], **kwargs)]
+    return [e async for e in provider.respond(instructions="sys", input=[], tools=[], **kwargs)]
 
 
 async def test_prose_only_turn() -> None:
     events = [text_delta("Hel"), text_delta("lo"), completed(response_id="resp_1")]
     provider = OpenAIProvider(FakeOpenAIClient(stream_events=events), default_model="gpt-4o")
     out = await _collect(provider)
-    assert [type(e) for e in out] == [AssistantDelta, AssistantDelta, ResponseCompleted]
-    assert "".join(e.text for e in out if isinstance(e, AssistantDelta)) == "Hello"
-    assert out[-1].response_id == "resp_1"
+    types = [e.event_type for e in out]
+    assert types == ["assistant_delta", "assistant_delta", "response_completed"]
+    assert "".join(e.data["text"] for e in out if e.event_type == "assistant_delta") == "Hello"
+    assert out[-1].data["response_id"] == "resp_1"
 
 
 async def test_tool_call_turn() -> None:
@@ -46,11 +44,11 @@ async def test_tool_call_turn() -> None:
     ]
     provider = OpenAIProvider(FakeOpenAIClient(stream_events=events), default_model="gpt-4o")
     out = await _collect(provider)
-    started = [e for e in out if isinstance(e, ToolCallStarted)]
-    done = [e for e in out if isinstance(e, ToolCallArgsDone)]
-    assert started and started[0].name == "create_quiz" and started[0].call_id == "call_1"
-    assert done and done[0].arguments == {"count": 5}
-    assert done[0].call_id == "call_1" and done[0].name == "create_quiz"
+    started = [e for e in out if e.event_type == "tool_call_started"]
+    done = [e for e in out if e.event_type == "tool_call_args_done"]
+    assert started and started[0].data["name"] == "create_quiz" and started[0].data["call_id"] == "call_1"
+    assert done and done[0].data["arguments"] == {"count": 5}
+    assert done[0].data["call_id"] == "call_1" and done[0].data["name"] == "create_quiz"
 
 
 def test_translator_ignores_unknown_events() -> None:
@@ -73,8 +71,8 @@ async def test_args_done_bad_json_yields_empty_dict() -> None:
     ]
     provider = OpenAIProvider(FakeOpenAIClient(stream_events=events), default_model="gpt-4o")
     out = await _collect(provider)
-    done = [e for e in out if isinstance(e, ToolCallArgsDone)]
-    assert done[0].arguments == {}
+    done = [e for e in out if e.event_type == "tool_call_args_done"]
+    assert done[0].data["arguments"] == {}
 
 
 class _Schema(BaseModel):
@@ -84,9 +82,7 @@ class _Schema(BaseModel):
 async def test_respond_structured_returns_parsed() -> None:
     parsed = _Schema(answer="42")
     result_obj = SimpleNamespace(status="completed", output=[], output_parsed=parsed)
-    provider = OpenAIProvider(
-        FakeOpenAIClient(parse_result=result_obj), default_model="gpt-4o"
-    )
+    provider = OpenAIProvider(FakeOpenAIClient(parse_result=result_obj), default_model="gpt-4o")
     got = await provider.respond_structured(instructions="s", input=[], schema=_Schema)
     assert got == parsed
 

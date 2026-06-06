@@ -1,6 +1,6 @@
 """B1.2 acceptance — compaction keeps recent verbatim + summary; draft survives; ops bump version."""
 
-from app.contracts.types import Artifact
+from app.contracts import Artifact
 from app.core.memory import TranscriptManager, apply_operation, estimate_tokens
 from tests.fakes.fake_stores import InMemoryArtifactRegistry, InMemorySessionStore
 
@@ -68,6 +68,6 @@ async def test_operation_bumps_version_not_prose(ctx) -> None:
 
 
 def test_estimate_tokens() -> None:
-    from app.contracts.types import Message
+    from app.contracts import Message
 
     assert estimate_tokens([Message(role="user", content="x" * 40)]) == 10

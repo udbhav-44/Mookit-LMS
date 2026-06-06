@@ -14,7 +14,7 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel
 
-from app.contracts.types import RequestContext
+from app.contracts import RequestContext
 from app.gen.quiz.schemas import Citation
 
 
@@ -43,14 +43,25 @@ async def gather_evidence(
     spans = await retrieve(ctx, doc_artifact_id, query, k)
     evidence: list[Evidence] = []
     for s in spans:
-        evidence.append(
-            Evidence(
-                span_id=getattr(s, "span_id", "") or "",
-                text=getattr(s, "text", "") or "",
-                locator=dict(getattr(s, "locator", {}) or {}),
-            )
-        )
+        evidence.append(_to_evidence(s))
     return evidence
+
+
+def _to_evidence(s: Any) -> Evidence:
+    """Normalise a retrieved span — either an object (test fake) or a dict (Dev A RAGStore)."""
+    if isinstance(s, dict):
+        span_id = str(s.get("span_id") or s.get("chunk_index") or "")
+        text = s.get("text", "") or ""
+        locator = dict(s.get("locator") or {})
+        # RAGStore also carries a char span; fold it into the locator for citation fidelity.
+        if "span" in s and isinstance(s["span"], dict):
+            locator = {**s["span"], **locator}
+        return Evidence(span_id=span_id, text=text, locator=locator)
+    return Evidence(
+        span_id=str(getattr(s, "span_id", "") or ""),
+        text=getattr(s, "text", "") or "",
+        locator=dict(getattr(s, "locator", {}) or {}),
+    )
 
 
 def citation_for(doc_artifact_id: str, evidence: Evidence) -> Citation:

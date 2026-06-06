@@ -57,7 +57,7 @@ async def test_lecture_flow(ctx) -> None:
     harness = ConfirmHarness(mookit)
 
     d = await DraftLectureTool(mookit, reg).run(
-        ctx, {"week_label": "Week 4", "file_artifact_id": "art_9"}
+        ctx, {"week_label": "Week 4", "file_artifact_id": "art_9", "file_mookit_id": 55}
     )
     proposal = await PublishLectureTool(reg).run(ctx, {"draft_id": d.artifact_id})
     writes_before = list(mookit.write_calls)

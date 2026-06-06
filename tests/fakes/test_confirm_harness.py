@@ -2,19 +2,26 @@
 
 import pytest
 
-from app.contracts.types import PreviewRender, ProposedAction
+from app.contracts import PreviewRender, ProposedAction
 from tests.fakes.confirm_harness import ConfirmHarness, canonical_hash
 from tests.fakes.fake_mookit import FakeMooKitClient
 from tests.fakes.fake_rag import retrieve
 
 
 def _announcement_action() -> ProposedAction:
-    payload = {"title": "Exam reminder", "description": "Tomorrow", "type": "normal", "notifyMail": 1}
+    payload = {
+        "title": "Exam reminder",
+        "description": "Tomorrow",
+        "type": "normal",
+        "notifyMail": 1,
+        "published": {"status": 1, "releaseOn": None},
+        "_audience_intent": "all",
+    }
     return ProposedAction(
         action="send_announcement",
         target_ref={"audience": "all"},
         payload=payload,
-        preview=PreviewRender(title="Send announcement"),
+        preview=PreviewRender(title="Send announcement", summary_lines=[]),
         content_hash=canonical_hash(payload),
     )
 

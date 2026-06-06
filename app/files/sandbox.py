@@ -13,12 +13,8 @@ All extracted text is treated as *untrusted data* — callers must not execute i
 """
 
 import asyncio
-import csv
-import io
 import logging
 import os
-import resource
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -31,13 +27,13 @@ _MAX_MEM_BYTES = 256 * 1024 * 1024  # 256 MB
 
 # ── child-process entry point ────────────────────────────────────────────────
 
-_EXTRACTOR_SCRIPT = """
+_EXTRACTOR_SCRIPT = f"""
 import sys, os, resource, io, csv
 
 def _limit():
     try:
-        resource.setrlimit(resource.RLIMIT_CPU, ({cpu}, {cpu}))
-        resource.setrlimit(resource.RLIMIT_AS,  ({mem}, {mem}))
+        resource.setrlimit(resource.RLIMIT_CPU, ({_MAX_CPU_SECONDS}, {_MAX_CPU_SECONDS}))
+        resource.setrlimit(resource.RLIMIT_AS,  ({_MAX_MEM_BYTES}, {_MAX_MEM_BYTES}))
     except Exception:
         pass  # best-effort; parent has its own timeout guard
 
@@ -93,7 +89,7 @@ except Exception as exc:
     sys.exit(f"Extraction failed: {{exc}}")
 
 sys.stdout.write(text)
-""".format(cpu=_MAX_CPU_SECONDS, mem=_MAX_MEM_BYTES)
+"""
 
 
 class ExtractionError(Exception):
@@ -129,10 +125,12 @@ class ExtractionSandbox:
                 stdout, stderr = await asyncio.wait_for(
                     proc.communicate(), timeout=EXTRACT_TIMEOUT_SECONDS
                 )
-            except asyncio.TimeoutError:
+            except asyncio.TimeoutError as err:
                 proc.kill()
                 await proc.wait()
-                raise ExtractionError(f"Extraction timed out after {EXTRACT_TIMEOUT_SECONDS}s")
+                raise ExtractionError(
+                    f"Extraction timed out after {EXTRACT_TIMEOUT_SECONDS}s"
+                ) from err
 
             if proc.returncode != 0:
                 err_msg = stderr.decode(errors="replace").strip()

@@ -11,8 +11,9 @@ Dev B hooks into `check_input_guardrails` before sending user text to the LLM an
 `sanitize_for_publish` before constructing a ProposedAction payload.
 """
 
-import re
 import logging
+import re
+
 from openai import AsyncOpenAI
 
 from ..config import settings

@@ -1,26 +1,34 @@
 import logging
 import time
-from typing import Any, Callable, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 import httpx
 from tenacity import (
+    before_sleep_log,
     retry,
     retry_if_exception_type,
     stop_after_attempt,
     wait_random_exponential,
-    before_sleep_log,
 )
 
+from ..contracts.context import PermissionMatrix, RequestContext
 from ..contracts.mookit import MooKitClient as IMooKitClient
-from ..contracts.context import RequestContext, PermissionMatrix
-from .schemas import (
-    AssessmentCreate, QuestionCreate, AnnouncementCreate, AnnouncementUpdate,
-    LectureCreate, TaxonomyTerm, ManagedFile, UserMe,
-    CourseResourceCreate,
-)
 from .errors import (
-    MooKitError, MooKitRateLimitError, MooKitServerError,
-    CircuitOpenError, map_http_error,
+    CircuitOpenError,
+    MooKitRateLimitError,
+    MooKitServerError,
+    map_http_error,
+)
+from .schemas import (
+    AnnouncementCreate,
+    AnnouncementUpdate,
+    AssessmentCreate,
+    LectureCreate,
+    ManagedFile,
+    QuestionCreate,
+    TaxonomyTerm,
+    UserMe,
 )
 
 logger = logging.getLogger(__name__)
@@ -142,8 +150,10 @@ class MooKitClient(IMooKitClient):
 
             try:
                 data = resp.json()
-            except Exception:
-                raise MooKitServerError(f"Non-JSON response ({resp.status_code})", code=resp.status_code)
+            except Exception as json_err:
+                raise MooKitServerError(
+                    f"Non-JSON response ({resp.status_code})", code=resp.status_code
+                ) from json_err
 
             if resp.status_code >= 500:
                 msg = data.get("error", {}).get("message", resp.text) if isinstance(data, dict) else resp.text
@@ -176,7 +186,7 @@ class MooKitClient(IMooKitClient):
             return PermissionMatrix(resources=data)
         return PermissionMatrix(resources={})
 
-    async def list_taxonomy(self, ctx: RequestContext, type: str) -> List[TaxonomyTerm]:
+    async def list_taxonomy(self, ctx: RequestContext, type: str) -> list[TaxonomyTerm]:
         data = await self.call(ctx, "GET", f"/taxonomies/{type}")
         # Spec returns a direct array in data; fall back to .items for paginated responses.
         if isinstance(data, list):
@@ -229,9 +239,9 @@ class MooKitClient(IMooKitClient):
         self,
         ctx: RequestContext,
         files: dict,
-        entity_type: Optional[str] = None,
+        entity_type: str | None = None,
         entity_id: int = 0,
-    ) -> List[ManagedFile]:
+    ) -> list[ManagedFile]:
         params: dict = {}
         if entity_type:
             params["entityType"] = entity_type
@@ -253,8 +263,8 @@ class MooKitClient(IMooKitClient):
         ctx: RequestContext,
         entity_type: str,
         entity_id: int,
-        resources: List[dict],
-    ) -> List[Any]:
+        resources: list[dict],
+    ) -> list[Any]:
         # Spec: POST /{entityType}/{entityId}/course-resources with body {"resources": [...]}
         path = f"/{entity_type}/{entity_id}/course-resources"
         data = await self.call(ctx, "POST", path, json={"resources": resources})
@@ -284,7 +294,7 @@ class FakeMooKitClient(IMooKitClient):
             "users": ["list", "view"],
         })
 
-    async def list_taxonomy(self, ctx: RequestContext, type: str) -> List[TaxonomyTerm]:
+    async def list_taxonomy(self, ctx: RequestContext, type: str) -> list[TaxonomyTerm]:
         return [TaxonomyTerm(id=1, name=f"{type.capitalize()} 1", type=type)]
 
     async def create_assessment(self, ctx: RequestContext, type: str, body: AssessmentCreate) -> Any:
@@ -304,7 +314,7 @@ class FakeMooKitClient(IMooKitClient):
         return {"id": announcement_id}
 
     async def upload_file(self, ctx: RequestContext, files: dict,
-                          entity_type: Optional[str] = None, entity_id: int = 0) -> List[ManagedFile]:
+                          entity_type: str | None = None, entity_id: int = 0) -> list[ManagedFile]:
         return [ManagedFile(id=1, fileUrl="https://example.com/f.pdf",
                             filemime="application/pdf", filesize=1024, filename="f.pdf")]
 
@@ -312,5 +322,5 @@ class FakeMooKitClient(IMooKitClient):
         return {"id": 101, "title": body.title}
 
     async def attach_course_resource(self, ctx: RequestContext, entity_type: str,
-                                     entity_id: int, resources: List[dict]) -> List[Any]:
+                                     entity_id: int, resources: list[dict]) -> list[Any]:
         return [{"id": i + 1, **r} for i, r in enumerate(resources)]

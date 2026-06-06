@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from ..contracts.context import RequestContext
 from ..core.context import get_request_context
-from ..store.db import Session as SessionModel, Message as MessageModel
+from ..store.db import Session as SessionModel
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,6 @@ async def get_session(
     session_store = getattr(request.app.state, "session_store", None)
     messages = []
     if session_store:
-        from ..contracts.context import RequestContext as RC
         # Build a minimal ctx scoped to this session_id.
         scoped_ctx = ctx.model_copy(update={"session_id": session_id})
         msgs = await session_store.get_transcript(scoped_ctx, max_tokens=8000)

@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app.contracts.types import PreviewRender
+from app.contracts import PreviewRender
 
 # Strip markdown links [text](url) -> text and images ![alt](url) -> "" (anti-exfil).
 _MD_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")

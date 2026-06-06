@@ -18,12 +18,11 @@ import hashlib
 import json
 import secrets
 import uuid
-from typing import Tuple
 
 from sqlalchemy import insert, select, update
 
-from ..contracts.tools import ProposedAction
 from ..contracts.context import RequestContext
+from ..contracts.tools import ProposedAction
 from ..store.db import PendingAction
 
 
@@ -43,7 +42,7 @@ class ConfirmationGate:
 
     async def propose(
         self, ctx: RequestContext, action: ProposedAction
-    ) -> Tuple[str, str]:
+    ) -> tuple[str, str]:
         """Persist a ProposedAction and return (action_id, confirm_token).
 
         The confirm_token is a cryptographically random 32-byte URL-safe token
@@ -83,7 +82,7 @@ class ConfirmationGate:
         action_id: str,
         tenant_key: str,
         confirm_token: str,
-    ) -> Tuple[bool, PendingAction | None]:
+    ) -> tuple[bool, PendingAction | None]:
         """Return (True, action) iff the token is valid and the payload hash still matches.
 
         All three checks must pass; failure in any returns (False, None) without

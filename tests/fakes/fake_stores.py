@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.contracts.types import (
+from app.contracts import (
     Artifact,
     ArtifactRegistry,
     Message,

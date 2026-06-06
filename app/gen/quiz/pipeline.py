@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from app.contracts.types import Artifact, ArtifactRegistry, RequestContext
+from app.contracts import Artifact, ArtifactRegistry, RequestContext
 from app.gen.quiz.distractors import distractor_quality_check
 from app.gen.quiz.params import Difficulty, QuizParams
 from app.gen.quiz.rag import Evidence, RetrieveFn, citation_for, gather_evidence

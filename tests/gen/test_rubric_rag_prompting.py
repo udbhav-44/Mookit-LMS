@@ -1,6 +1,6 @@
 """B2.6 / B2.1 / B2.2 acceptance — rubric sum, citation attachment, lean spotlighted prompt."""
 
-from app.contracts.types import RequestContext
+from app.contracts import RequestContext
 from app.gen.quiz.params import QuizParams
 from app.gen.quiz.prompting import BLOOM_DEFINITIONS, build_quiz_prompt
 from app.gen.quiz.rag import Evidence, citation_for, gather_evidence

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from app.contracts.types import ArtifactRegistry, RequestContext
+from app.contracts import ArtifactRegistry, RequestContext
 
 # Phrase → artifact type hints. Used to bias resolution toward the referenced kind.
 _TYPE_HINTS: dict[str, str] = {

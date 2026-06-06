@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from app.contracts.types import (
+from app.contracts import (
     PreviewRender,
     ProposedAction,
     RequestContext,
@@ -60,7 +60,7 @@ async def _drain(orch, ctx, text):
 
 
 async def test_prose_only_turn(ctx: RequestContext) -> None:
-    from app.contracts.types import PermissionMatrix
+    from app.contracts import PermissionMatrix
 
     llm = ScriptedLLM([prose_round("Hello there", response_id="r1")])
     orch, _ = _make(llm, tools=[EchoTool()], perms=PermissionMatrix())
@@ -111,7 +111,7 @@ async def test_parallel_disabled_when_mutating_tool_visible(ctx: RequestContext)
 
 
 async def test_parallel_enabled_when_only_read_tools(ctx: RequestContext) -> None:
-    from app.contracts.types import PermissionMatrix
+    from app.contracts import PermissionMatrix
 
     llm = ScriptedLLM([prose_round("hi", response_id="r1")])
     orch, _ = _make(llm, tools=[EchoTool()], perms=PermissionMatrix())

@@ -1,6 +1,6 @@
 """B3.2 acceptance — no recipient ids; channel inference; sanitization; propose-not-execute."""
 
-from app.contracts.types import ProposedAction, ToolResult
+from app.contracts import ProposedAction, ToolResult
 from app.tools.announcement import DraftAnnouncementTool, SendAnnouncementTool
 from tests.fakes.fake_stores import InMemoryArtifactRegistry
 
@@ -32,8 +32,8 @@ async def test_send_proposes_with_audience_intent_not_ids(ctx) -> None:
     aid = await _draft(ctx, reg, "Deadline extended", audience="Section 3")
     result = await SendAnnouncementTool(reg).run(ctx, {"draft_id": aid})
     assert isinstance(result, ProposedAction)
-    assert result.payload["audience_intent"] == "Section 3"
-    # No resolved recipient ids anywhere in the payload.
+    # Audience is an intent (magic key), resolved server-side by the executor — never a recipient id.
+    assert result.payload["_audience_intent"] == "Section 3"
     assert "sectionIds" not in result.payload
     assert "recipients" not in result.payload
 

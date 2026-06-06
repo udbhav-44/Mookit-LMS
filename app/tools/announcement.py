@@ -11,7 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from app.contracts.types import (
+from app.contracts import (
     Artifact,
     ArtifactRegistry,
     ProposedAction,
@@ -76,15 +76,16 @@ class SendAnnouncementTool(Tool):
         if draft is None:
             raise KeyError(parsed.draft_id)
         d = draft.payload
-        # The mooKIT payload carries the audience INTENT, not resolved ids; the gate resolves
-        # sectionIds server-side. Empty/"all" => all students.
+        # AnnouncementCreate-compatible body. The audience INTENT is carried in a magic `_audience_intent`
+        # key (NOT an AnnouncementCreate field); the deterministic executor resolves it to sectionIds
+        # server-side. The model never names resolved recipient ids.
         payload: dict[str, Any] = {
             "title": d["title"],
             "description": sanitize_markdown(d["description"]),
             "type": d["type"],
             "notifyMail": int(d["notify_mail"]),
-            "audience_intent": d["audience_intent"],
-            "published": {"status": 1},
+            "published": {"status": 1, "releaseOn": None},
+            "_audience_intent": d["audience_intent"],
         }
         preview = build_announcement_preview(
             subject=d["title"],

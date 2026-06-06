@@ -1,6 +1,6 @@
 """B2.8 acceptance (CP3) — end-to-end grounded draft; all 5 types; citation invariant; edits bump version."""
 
-from app.contracts.types import RequestContext
+from app.contracts import RequestContext
 from app.gen.quiz.params import QuizParams
 from app.gen.quiz.pipeline import QuizPipeline
 from tests.fakes.fake_rag import retrieve

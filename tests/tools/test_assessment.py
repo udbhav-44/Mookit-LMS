@@ -1,6 +1,6 @@
 """B3.1 acceptance — propose-not-execute, preview warnings, hash stability, edit changes hash."""
 
-from app.contracts.types import ProposedAction, ToolResult
+from app.contracts import ProposedAction, ToolResult
 from app.gen.quiz.pipeline import QuizPipeline
 from app.tools.assessment import (
     CreateQuizTool,
@@ -38,9 +38,13 @@ async def test_publish_proposes_never_executes(ctx) -> None:
     result = await PublishAssessmentTool(reg).run(ctx, {"draft_id": aid})
     assert isinstance(result, ProposedAction)
     assert result.action == "publish_assessment"
-    assert result.payload["assessment"]["published"]["status"] == 1
-    # citation carried through into the committed payload
-    assert result.payload["questions"][0]["_citation"]["source_id"] == "doc-1"
+    # Created as a draft (status 0); the executor flips to 1 after questions are added.
+    assert result.payload["assessment"]["published"]["status"] == 0
+    assert result.payload["_type"] == "quizzes"
+    # citations carried alongside for audit/provenance
+    assert result.payload["citations"][0]["source_id"] == "doc-1"
+    # each question body is QuestionCreate-compatible (has published)
+    assert result.payload["questions"][0]["published"]["status"] == 1
 
 
 async def test_preview_warns_on_higher_order(ctx) -> None:

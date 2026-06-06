@@ -9,13 +9,12 @@ attach-as-course-resource step in the payload.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel
 
-from app.contracts.mookit import MooKitClient
-from app.contracts.types import (
+from app.contracts import (
     Artifact,
     ArtifactRegistry,
     ProposedAction,
@@ -23,6 +22,7 @@ from app.contracts.types import (
     Tool,
     ToolResult,
 )
+from app.contracts.mookit import MooKitClient
 from app.core.hashing import canonical_hash
 from app.gen.lecture_meta import draft_lecture_meta
 from app.gen.provenance import stamp
@@ -34,6 +34,7 @@ class DraftLectureArgs(BaseModel):
     week_label: str
     module_label: str | None = None
     file_artifact_id: str | None = None
+    file_mookit_id: int | None = None  # mooKIT fileId of the uploaded video (for resource attach)
     release_on: int | None = None  # unix seconds; None => publish now
 
 
@@ -58,12 +59,14 @@ class DraftLectureTool(Tool):
             file_artifact_id=parsed.file_artifact_id,
             release_on=parsed.release_on,
         )
+        payload = meta.model_dump()
+        payload["file_mookit_id"] = parsed.file_mookit_id
         art = Artifact(
             id="",
             type="lecture_draft",
             title=meta.title,
             status="draft",
-            payload=meta.model_dump(),
+            payload=payload,
             provenance=stamp(
                 ai_generated=True,
                 edited_by_human=False,
@@ -104,17 +107,23 @@ class PublishLectureTool(Tool):
         schedule_label = _fmt_schedule(d.get("release_on"))
         attachments = [d["file_artifact_id"]] if d.get("file_artifact_id") else []
 
+        # LectureCreate-compatible body (flat) + optional `_resource` magic key for the executor to
+        # attach the uploaded video as a course resource. topicId defaults to 0 when no module.
         payload: dict[str, Any] = {
-            "lecture": {
-                "title": d["title"],
-                "weekId": d.get("week_id"),
-                "topicId": d.get("topic_id"),
-                "published": 0 if scheduled else 1,
-                "releaseOn": d.get("release_on"),
-            },
-            "file_ids": [d["file_artifact_id"]] if d.get("file_artifact_id") else [],
+            "title": d["title"],
+            "weekId": d.get("week_id"),
+            "topicId": d.get("topic_id") or 0,
+            "published": 0 if scheduled else 1,
+            "releaseOn": d.get("release_on"),
             "provenance": draft.provenance,
         }
+        file_id = d.get("file_mookit_id")
+        if file_id is not None:
+            payload["_resource"] = {
+                "resourceType": "video",
+                "resourceFileId": int(file_id),
+                "isPrimary": True,
+            }
         preview = build_lecture_preview(
             title=d["title"],
             week_label=d.get("week_label", ""),
@@ -136,4 +145,4 @@ class PublishLectureTool(Tool):
 def _fmt_schedule(release_on: int | None) -> str | None:
     if release_on is None:
         return None
-    return datetime.fromtimestamp(release_on, tz=UTC).strftime("%Y-%m-%d %H:%M UTC")
+    return datetime.fromtimestamp(release_on, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")

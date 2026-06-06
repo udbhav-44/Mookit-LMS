@@ -1,38 +1,36 @@
-"""B1.1 — Orchestrator (Plan-then-Execute loop).
+"""Orchestrator (Plan-then-Execute loop) — Dev B, integrated onto Dev A's platform contracts.
 
 Drives a turn:
-  1. Assemble instructions (system) + tool schemas (stable prefix) and input (manifest → transcript →
-     user turn) via build_input.
-  2. Stream the model with parallel_tool_calls=False whenever a mutating tool is visible.
+  1. Assemble instructions (system) + tool schemas + input (manifest → transcript → user turn).
+  2. Stream the model (canonical generic LLMEvent) with parallel_tool_calls=False when a mutating tool
+     is visible.
   3. On a completed tool call:
-       - read/draft tier  → execute via Tool.run, append a function_call_output, continue the loop.
-       - publish tier     → DO NOT execute. Surface the ProposedAction as a pending_confirmation and
-                            stop that branch (the deterministic gate executes it, never the model).
-  4. Loop with previous_response_id chaining until the model returns prose with no tool calls; emit done.
+       - read/draft tier  → execute via Tool.run, append function_call_output, continue the loop.
+       - publish tier     → DO NOT execute. Persist the ProposedAction via the confirmation gate seam
+                            and surface `pending_confirmation`; the deterministic executor runs it later.
+  4. Loop with previous_response_id chaining until prose with no tool calls; emit done.
 
-Emits OrchestratorEvent objects that map 1:1 to the SSE event schema (Contract 6).
+`run_turn` yields typed `OrchestratorEvent`s (used by tests). `stream` adapts them to the SSE dict shape
+`{"event","data": json}` that Dev A's app/api/chat.py forwards to the client.
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import json
+from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
 from pydantic import BaseModel
 
 from app.config import Settings, get_settings
-from app.contracts.mookit import MooKitClient
-from app.contracts.types import (
+from app.contracts import (
     ArtifactRegistry,
-    AssistantDelta,
-    ErrorEvent,
     LLMProvider,
+    MooKitClient,
     ProposedAction,
     RequestContext,
-    ResponseCompleted,
     SessionStore,
-    ToolCallArgsDone,
-    ToolCallStarted,
     ToolResult,
 )
 from app.core.guardrails import screen_tool_output
@@ -44,9 +42,13 @@ from app.tools.registry import ToolRegistry, UnknownToolError
 
 MAX_TOOL_ROUNDS = 8  # safety bound on the plan-execute loop
 
+# Persists a ProposedAction and returns (action_id, confirm_token). In the app this is
+# ConfirmationGate.propose; in tests a fake. None → emit a token-less pending_confirmation.
+ProposalSink = Callable[[RequestContext, ProposedAction], Awaitable[tuple[str, str]]]
+
 
 class OrchestratorEvent(BaseModel):
-    """Maps to the SSE wire schema."""
+    """Maps to the SSE wire schema (Contract 6)."""
 
     event: Literal[
         "assistant_delta",
@@ -72,6 +74,7 @@ class Orchestrator:
         mookit: MooKitClient,
         settings: Settings | None = None,
         guardrail_hook: Any | None = None,
+        proposal_sink: ProposalSink | None = None,
     ) -> None:
         self._llm = llm
         self._registry = registry
@@ -80,12 +83,20 @@ class Orchestrator:
         self._resolver = resolver
         self._mookit = mookit
         self._guardrail_hook = guardrail_hook
+        self._proposal_sink = proposal_sink
         self._settings = settings or get_settings()
         self._transcript = TranscriptManager(
             sessions,
-            max_tokens=self._settings.transcript_max_tokens,
-            keep_recent=self._settings.transcript_keep_recent,
+            max_tokens=self._settings.memory.transcript_max_tokens,
+            keep_recent=self._settings.memory.transcript_keep_recent,
         )
+
+    # ------------------------------------------------------------------
+    # SSE adapter consumed by app/api/chat.py
+    # ------------------------------------------------------------------
+    async def stream(self, ctx: RequestContext, user_text: str) -> AsyncIterator[dict[str, str]]:
+        async for ev in self.run_turn(ctx, user_text):
+            yield {"event": ev.event, "data": json.dumps(ev.data)}
 
     async def run_turn(
         self, ctx: RequestContext, user_text: str
@@ -95,7 +106,7 @@ class Orchestrator:
 
         tools = self._registry.openai_tools(ctx.permissions)
         parallel = not self._registry.has_mutating_tool(ctx.permissions)
-        cache_key = prompt_cache_key(tenant_key=ctx.tenant_key, model=self._settings.default_model)
+        cache_key = prompt_cache_key(tenant_key=ctx.tenant_key, model=self._settings.openai.model)
 
         manifest = await self._resolver.manifest(ctx)
         transcript = await self._transcript.view(ctx)
@@ -104,17 +115,16 @@ class Orchestrator:
         )
 
         previous_response_id: str | None = None
-        assistant_text_parts: list[str] = []
 
         for _round in range(MAX_TOOL_ROUNDS):
-            pending_tool_calls: list[ToolCallArgsDone] = []
+            pending_tool_calls: list[dict[str, Any]] = []  # each: {call_id, name, arguments}
             round_text: list[str] = []
             response_id: str | None = None
             errored = False
 
             stream = self._llm.respond(
                 instructions=SYSTEM_PROMPT,
-                input=input_items if previous_response_id is None else _delta_input(input_items),
+                input=input_items,
                 tools=tools,
                 tool_choice="auto",
                 parallel_tool_calls=parallel,
@@ -123,43 +133,48 @@ class Orchestrator:
             )
 
             async for ev in stream:
-                if isinstance(ev, AssistantDelta):
-                    round_text.append(ev.text)
-                    yield OrchestratorEvent(event="assistant_delta", data={"text": ev.text})
-                elif isinstance(ev, ToolCallStarted):
+                etype = ev.event_type
+                data = ev.data if isinstance(ev.data, dict) else {}
+                if etype == "assistant_delta":
+                    text = data.get("text", "")
+                    round_text.append(text)
+                    yield OrchestratorEvent(event="assistant_delta", data={"text": text})
+                elif etype == "tool_call_started":
                     yield OrchestratorEvent(
-                        event="tool_started", data={"tool": ev.name, "label": f"Calling {ev.name}…"}
+                        event="tool_started",
+                        data={"tool": data.get("name", ""), "label": f"Calling {data.get('name', '')}…"},
                     )
-                elif isinstance(ev, ToolCallArgsDone):
-                    pending_tool_calls.append(ev)
-                elif isinstance(ev, ResponseCompleted):
-                    response_id = ev.response_id
-                elif isinstance(ev, ErrorEvent):
+                elif etype == "tool_call_args_done":
+                    pending_tool_calls.append(data)
+                elif etype == "response_completed":
+                    response_id = data.get("response_id")
+                elif etype == "error":
                     errored = True
                     yield OrchestratorEvent(
                         event="error",
-                        data={"code": ev.code, "message": ev.message, "retryable": ev.retryable},
+                        data={
+                            "code": data.get("code", "error"),
+                            "message": data.get("message", ""),
+                            "retryable": data.get("retryable", False),
+                        },
                     )
 
-            assistant_text_parts.extend(round_text)
             previous_response_id = response_id
 
             if errored:
                 return
 
-            # No tool calls ⇒ the model produced a final prose answer.
             if not pending_tool_calls:
                 if round_text:
                     await self._sessions.append_message(ctx, "assistant", "".join(round_text))
                 yield OrchestratorEvent(event="done", data={"response_id": response_id or ""})
                 return
 
-            # Dispatch tool calls. After a publish proposal we stop (human must confirm).
             input_items = []
             proposed = False
             for call in pending_tool_calls:
                 outcome = await self._dispatch(ctx, call)
-                async for emitted in outcome.events:
+                for emitted in outcome.events:
                     yield emitted
                 if outcome.proposed:
                     proposed = True
@@ -167,54 +182,53 @@ class Orchestrator:
                     input_items.append(outcome.function_output)
 
             if proposed:
-                # A publish-tier tool proposed an action; await human confirmation.
                 yield OrchestratorEvent(event="done", data={"response_id": response_id or ""})
                 return
 
-        # Hit the loop bound.
         yield OrchestratorEvent(
             event="error",
             data={"code": "max_rounds", "message": "tool loop exceeded bound", "retryable": False},
         )
 
-    async def _dispatch(self, ctx: RequestContext, call: ToolCallArgsDone) -> _Dispatch:
+    async def _dispatch(self, ctx: RequestContext, call: dict[str, Any]) -> _Dispatch:
+        call_id = call.get("call_id", "")
+        name = call.get("name", "")
+        arguments = call.get("arguments", {}) or {}
         events: list[OrchestratorEvent] = []
         try:
-            tool = self._registry.get(call.name)
+            tool = self._registry.get(name)
         except UnknownToolError:
             return _Dispatch(
-                events=_aiter(
-                    [
-                        OrchestratorEvent(
-                            event="error",
-                            data={
-                                "code": "unknown_tool",
-                                "message": f"unknown tool: {call.name}",
-                                "retryable": False,
-                            },
-                        )
-                    ]
-                ),
-                function_output=_fn_output(call.call_id, {"ok": False, "error": "unknown_tool"}),
+                events=[
+                    OrchestratorEvent(
+                        event="error",
+                        data={"code": "unknown_tool", "message": f"unknown tool: {name}", "retryable": False},
+                    )
+                ],
+                function_output=_fn_output(call_id, {"ok": False, "error": "unknown_tool"}),
                 proposed=False,
             )
 
-        result = await tool.run(ctx, call.arguments)
+        result = await tool.run(ctx, arguments)
 
         if isinstance(result, ProposedAction):
-            # Publish tier: NEVER execute; surface for confirmation.
-            events.append(
-                OrchestratorEvent(
-                    event="pending_confirmation",
-                    data={
-                        "action": result.action,
-                        "target_ref": result.target_ref,
-                        "content_hash": result.content_hash,
-                        "preview": result.preview.model_dump(),
-                    },
-                )
-            )
-            return _Dispatch(events=_aiter(events), function_output=None, proposed=True)
+            # Publish tier: NEVER execute. Persist via the gate seam, surface for confirmation.
+            data: dict[str, Any] = {
+                "action": result.action,
+                "target_ref": result.target_ref,
+                "content_hash": result.content_hash,
+                "preview": result.preview.model_dump(),
+            }
+            if self._proposal_sink is not None:
+                action_id, confirm_token = await self._proposal_sink(ctx, result)
+                ttl = self._settings.security.confirm_token_ttl_seconds
+                data["action_id"] = action_id
+                data["confirm_token"] = confirm_token
+                data["expires_at"] = (
+                    datetime.now(timezone.utc) + timedelta(seconds=ttl)
+                ).isoformat()
+            events.append(OrchestratorEvent(event="pending_confirmation", data=data))
+            return _Dispatch(events=events, function_output=None, proposed=True)
 
         # read/draft tier: feed the result back to the model.
         if isinstance(result, ToolResult) and result.artifact_id:
@@ -227,20 +241,12 @@ class Orchestrator:
                     )
                 )
         payload = _tool_result_payload(result)
-        # Guardrails: screen the (possibly untrusted) tool output BEFORE it re-enters the model
-        # context. We flag (not block) — the confirmation gate is the real backstop.
         flags = await self._screen_output(payload)
         if flags:
             payload["_guardrail_flags"] = flags
-        return _Dispatch(
-            events=_aiter(events),
-            function_output=_fn_output(call.call_id, payload),
-            proposed=False,
-        )
+        return _Dispatch(events=events, function_output=_fn_output(call_id, payload), proposed=False)
 
     async def _screen_output(self, payload: dict[str, Any]) -> list[str]:
-        import json
-
         text = json.dumps(payload, ensure_ascii=False)
         result = await screen_tool_output(text, hook=self._guardrail_hook)
         return result.flags
@@ -250,7 +256,7 @@ class _Dispatch:
     def __init__(
         self,
         *,
-        events: AsyncIterator[OrchestratorEvent],
+        events: list[OrchestratorEvent],
         function_output: dict[str, Any] | None,
         proposed: bool,
     ) -> None:
@@ -270,20 +276,4 @@ def _tool_result_payload(result: ToolResult) -> dict[str, Any]:
 
 
 def _fn_output(call_id: str, output: dict[str, Any]) -> dict[str, Any]:
-    import json
-
     return {"type": "function_call_output", "call_id": call_id, "output": json.dumps(output)}
-
-
-def _delta_input(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """When chaining with previous_response_id, only the new function outputs / user turn are needed.
-
-    The first round sends the full assembled input; subsequent rounds send only the delta items
-    accumulated since (function_call_output entries).
-    """
-    return items
-
-
-async def _aiter(items: list[OrchestratorEvent]) -> AsyncIterator[OrchestratorEvent]:
-    for item in items:
-        yield item

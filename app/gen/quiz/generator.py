@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import secrets
 
-from app.contracts.types import LLMProvider
+from app.contracts import LLMProvider
 from app.core.prompts.system import SYSTEM_PROMPT
 from app.gen.quiz.gen_schemas import GEN_SCHEMA_BY_TYPE, to_full
 from app.gen.quiz.params import QuizParams

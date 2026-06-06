@@ -1,10 +1,9 @@
-import json
-from typing import List, Optional
 
 import redis.asyncio as aioredis
 
-from ..contracts.stores import SessionStore as ISessionStore, Message
 from ..contracts.context import RequestContext
+from ..contracts.stores import Message
+from ..contracts.stores import SessionStore as ISessionStore
 
 
 class RedisSessionStore(ISessionStore):
@@ -37,15 +36,15 @@ class RedisSessionStore(ISessionStore):
         pipe.expire(key, self._TTL)
         await pipe.execute()
 
-    async def get_transcript(self, ctx: RequestContext, *, max_tokens: int) -> List[Message]:
+    async def get_transcript(self, ctx: RequestContext, *, max_tokens: int) -> list[Message]:
         key = self._transcript_key(ctx)
-        raw_msgs = await self.redis.lrange(key, 0, -1)
+        raw_msgs = await self.redis.lrange(key, 0, -1)  # type: ignore[misc]
         messages = [Message.model_validate_json(m) for m in raw_msgs]
 
         # Trim to max_tokens from the end (most-recent messages) using a rough char proxy.
         # Dev B's compaction logic sets `max_tokens`; we honour the limit here.
         total = 0
-        trimmed: List[Message] = []
+        trimmed: list[Message] = []
         for msg in reversed(messages):
             token_est = len(msg.content) // 4  # ~4 chars per token rough estimate
             if total + token_est > max_tokens and trimmed:
@@ -58,7 +57,7 @@ class RedisSessionStore(ISessionStore):
         key = self._summary_key(ctx)
         await self.redis.set(key, summary, ex=self._TTL)
 
-    async def get_summary(self, ctx: RequestContext) -> Optional[str]:
+    async def get_summary(self, ctx: RequestContext) -> str | None:
         key = self._summary_key(ctx)
         value = await self.redis.get(key)
         return value if isinstance(value, str) else (value.decode() if value else None)

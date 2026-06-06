@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from app.contracts.types import RequestContext
+from app.contracts import RequestContext
 from app.core.orchestrator import Orchestrator
 
 

@@ -1,6 +1,8 @@
 import logging
 import sys
+
 from pythonjsonlogger import jsonlogger
+
 
 def setup_logging():
     log_handler = logging.StreamHandler(sys.stdout)
@@ -18,7 +20,7 @@ def setup_logging():
                 ctx = request_context_var.get()
                 record.request_id = ctx.request_id
                 record.tenant_key = ctx.tenant_key
-            except:
+            except Exception:
                 record.request_id = 'N/A'
                 record.tenant_key = 'N/A'
             return True

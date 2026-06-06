@@ -1,6 +1,6 @@
 """UK.3 acceptance — version bump, focus ordering, tenant isolation."""
 
-from app.contracts.types import Artifact, RequestContext
+from app.contracts import Artifact, RequestContext
 from tests.fakes.fake_stores import InMemoryArtifactRegistry, InMemorySessionStore
 
 

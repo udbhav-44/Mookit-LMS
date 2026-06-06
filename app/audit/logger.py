@@ -1,7 +1,10 @@
 import logging
+
 from sqlalchemy import insert
-from ..store.db import AuditLog
+
 from ..contracts.context import RequestContext
+from ..store.db import AuditLog
+
 
 class AuditLogger:
     def __init__(self, session_factory):

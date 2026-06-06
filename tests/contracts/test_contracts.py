@@ -34,11 +34,11 @@ def test_request_context_keeps_explicit_tenant_key() -> None:
     assert ctx.tenant_key == "custom"
 
 
-def test_permission_matrix_can() -> None:
-    pm = PermissionMatrix(allowed={"lectures": ["create", "list"]})
-    assert pm.can("lectures", "create")
-    assert not pm.can("lectures", "publish")
-    assert not pm.can("assessments", "create")
+def test_permission_matrix_has_permission() -> None:
+    pm = PermissionMatrix(resources={"lectures": ["create", "list"]})
+    assert pm.has_permission("lectures", "create")
+    assert not pm.has_permission("lectures", "publish")
+    assert not pm.has_permission("assessments", "create")
 
 
 def test_artifact_type_rejects_unknown() -> None:

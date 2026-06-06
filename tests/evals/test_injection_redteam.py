@@ -5,7 +5,7 @@ directly on every turn. The architectural isolation (publish tools only propose)
 no mooKIT write happens without the human confirm gate.
 """
 
-from app.contracts.types import Artifact
+from app.contracts import Artifact
 from app.core.orchestrator import Orchestrator
 from app.core.reference_resolver import ReferenceResolver
 from app.evals.injection_redteam import DEFAULT_CASES, RedTeamCase, run_redteam

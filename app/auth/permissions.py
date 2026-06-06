@@ -1,6 +1,6 @@
 from fastapi import HTTPException
-from ..contracts.context import RequestContext
 
+from ..contracts.context import RequestContext
 
 # Maps a confirm action name to the (resource, action) pair that the user must hold.
 # This is the server-side authoritative mapping — never derived from model output.

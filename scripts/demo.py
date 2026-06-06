@@ -20,7 +20,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from app.contracts.types import Artifact, RequestContext  # noqa: E402
+from app.contracts import Artifact, RequestContext  # noqa: E402
+
 from app.core.orchestrator import Orchestrator  # noqa: E402
 from app.core.reference_resolver import ReferenceResolver  # noqa: E402
 from app.evals.injection_redteam import DEFAULT_CASES, run_redteam  # noqa: E402
@@ -66,12 +67,12 @@ def _generator(live: bool):
 
     from app.config import get_settings
     from app.gen.quiz.generator import OpenAIQuestionGenerator
-    from app.llm.openai_provider import OpenAIProvider
+    from app.llm.openai import OpenAIProvider
 
     s = get_settings()
-    client = AsyncOpenAI(api_key=s.openai_api_key)
-    provider = OpenAIProvider(client, default_model=s.default_model)
-    return OpenAIQuestionGenerator(provider, temperature=s.quiz_temperature)
+    client = AsyncOpenAI(api_key=s.openai.api_key.get_secret_value())
+    provider = OpenAIProvider(client, default_model=s.openai.model)
+    return OpenAIQuestionGenerator(provider, temperature=s.openai.quiz_temperature)
 
 
 async def demo_quiz(ctx, reg, mookit, harness, live: bool) -> None:

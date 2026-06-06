@@ -1,31 +1,11 @@
-"""B0.2 — LLM event types + typed exceptions.
+"""LLM provider exceptions.
 
-Re-exports the LLMEvent union from contracts and adds provider-level exceptions.
+Typed event classes were removed in the Dev A/Dev B integration: the canonical contract uses a
+generic ``LLMEvent(event_type, data)`` (see app/contracts/llm.py). These exceptions are still raised by
+``respond_structured`` to make refusals and length-truncation explicit.
 """
 
 from __future__ import annotations
-
-from app.contracts.types import (
-    AssistantDelta,
-    ErrorEvent,
-    LLMEvent,
-    ResponseCompleted,
-    ToolCallArgsDelta,
-    ToolCallArgsDone,
-    ToolCallStarted,
-)
-
-__all__ = [
-    "AssistantDelta",
-    "ErrorEvent",
-    "LLMEvent",
-    "ModelRefusal",
-    "OutputTruncated",
-    "ResponseCompleted",
-    "ToolCallArgsDelta",
-    "ToolCallArgsDone",
-    "ToolCallStarted",
-]
 
 
 class ModelRefusal(Exception):

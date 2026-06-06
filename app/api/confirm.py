@@ -16,11 +16,11 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from ..contracts.context import RequestContext
-from ..core.context import get_request_context
-from ..core.confirmation import ConfirmationGate
-from ..core.executor import DeterministicExecutor
 from ..auth.permissions import require_action_permission
+from ..contracts.context import RequestContext
+from ..core.confirmation import ConfirmationGate
+from ..core.context import get_request_context
+from ..core.executor import DeterministicExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +92,7 @@ async def reject_action(
     # We do NOT require the confirm_token — the user can always reject their own proposals.
     async with request.app.state.session_factory() as session:
         from sqlalchemy import select
+
         from ..store.db import PendingAction
         result = await session.execute(
             select(PendingAction).where(

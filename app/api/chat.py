@@ -25,16 +25,16 @@ SSE event schema (Contract 6):
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from ..config import settings
 from ..contracts.context import RequestContext
 from ..core.context import get_request_context
 from ..core.rate_limit import check_rate_limit
-from ..config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,6 @@ async def chat_endpoint(
     return EventSourceResponse(
         event_generator(),
         ping=int(ping_interval),      # heartbeat keeps SSE alive through proxies
-        ping_message_factory=lambda: "ping",
     )
 
 

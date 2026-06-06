@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.config import PROMPT_VERSION
-from app.contracts.types import Message
+from app.contracts import Message
 
 
 def prompt_cache_key(*, tenant_key: str, model: str) -> str:

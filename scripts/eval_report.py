@@ -15,7 +15,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from app.contracts.types import Artifact, RequestContext  # noqa: E402
+from app.contracts import Artifact, RequestContext  # noqa: E402
+
 from app.core.orchestrator import Orchestrator  # noqa: E402
 from app.core.reference_resolver import ReferenceResolver  # noqa: E402
 from app.evals.hallucination import measure_grounding  # noqa: E402

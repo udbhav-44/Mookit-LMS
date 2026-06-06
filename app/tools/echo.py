@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from app.contracts.types import RequestContext, Tool, ToolResult
+from app.contracts import RequestContext, Tool, ToolResult
 from app.llm.schema import strict_schema
 
 

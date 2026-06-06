@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from app.contracts.types import RequestContext
+from app.contracts import RequestContext
 from tests.fakes.confirm_harness import ConfirmHarness
 from tests.fakes.fake_mookit import ALL_PERMISSIONS, FakeMooKitClient
 from tests.fakes.fake_stores import InMemoryArtifactRegistry, InMemorySessionStore
@@ -20,9 +20,11 @@ def ctx() -> RequestContext:
         instance_id="hello.iitk.ac.in",
         course_id="coursetest",
         user_id=1,
+        role="instructor",
         session_id="sess-1",
         forwarded_headers={"course": "coursetest", "token": "jwt", "uid": "1"},
         permissions=ALL_PERMISSIONS,
+        tenant_key="hello.iitk.ac.in:coursetest",
         request_id="req-1",
     )
 

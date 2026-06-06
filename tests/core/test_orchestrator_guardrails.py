@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from app.contracts.types import RequestContext, Tool, ToolResult
+from app.contracts import RequestContext, Tool, ToolResult
 from app.core.orchestrator import Orchestrator
 from app.core.reference_resolver import ReferenceResolver
 from app.llm.schema import strict_schema

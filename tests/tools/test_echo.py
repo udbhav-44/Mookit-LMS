@@ -1,6 +1,6 @@
 """B0.4 acceptance — EchoTool schema is strict and run echoes."""
 
-from app.contracts.types import RequestContext, Tool, ToolResult
+from app.contracts import RequestContext, Tool, ToolResult
 from app.tools.echo import EchoTool
 
 

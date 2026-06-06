@@ -1,11 +1,22 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Any, List, Callable, Coroutine
-import httpx
-from .context import RequestContext, PermissionMatrix
-from ..mookit.schemas import (
-    AssessmentCreate, QuestionCreate, AnnouncementCreate, AnnouncementUpdate,
-    LectureCreate, TaxonomyTerm, ManagedFile,
-)
+from typing import TYPE_CHECKING, Any
+
+from .context import PermissionMatrix, RequestContext
+
+# Type-only import to avoid a circular import (app.mookit package eagerly imports its client,
+# which imports this module). Annotations are strings (PEP 563) so these are never needed at runtime.
+if TYPE_CHECKING:
+    from ..mookit.schemas import (
+        AnnouncementCreate,
+        AnnouncementUpdate,
+        AssessmentCreate,
+        LectureCreate,
+        ManagedFile,
+        QuestionCreate,
+        TaxonomyTerm,
+    )
 
 class MooKitClient(ABC):
     @abstractmethod
@@ -20,7 +31,7 @@ class MooKitClient(ABC):
     async def get_permissions(self, ctx: RequestContext) -> PermissionMatrix: ...
 
     @abstractmethod
-    async def list_taxonomy(self, ctx: RequestContext, type: str) -> List[TaxonomyTerm]: ...
+    async def list_taxonomy(self, ctx: RequestContext, type: str) -> list[TaxonomyTerm]: ...
 
     @abstractmethod
     async def create_assessment(self, ctx: RequestContext, type: str, body: AssessmentCreate) -> Any: ...
@@ -38,10 +49,10 @@ class MooKitClient(ABC):
     async def update_announcement(self, ctx: RequestContext, announcement_id: int, body: AnnouncementUpdate) -> Any: ...
 
     @abstractmethod
-    async def upload_file(self, ctx: RequestContext, files: dict, entity_type: str | None = None, entity_id: int = 0) -> List[ManagedFile]: ...
+    async def upload_file(self, ctx: RequestContext, files: dict, entity_type: str | None = None, entity_id: int = 0) -> list[ManagedFile]: ...
 
     @abstractmethod
     async def create_lecture(self, ctx: RequestContext, body: LectureCreate) -> Any: ...
 
     @abstractmethod
-    async def attach_course_resource(self, ctx: RequestContext, entity_type: str, entity_id: int, resources: List[dict]) -> List[Any]: ...
+    async def attach_course_resource(self, ctx: RequestContext, entity_type: str, entity_id: int, resources: list[dict]) -> list[Any]: ...

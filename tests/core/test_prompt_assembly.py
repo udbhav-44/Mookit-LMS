@@ -1,6 +1,6 @@
 """B0.3 acceptance — static prefix byte-stable; variable content ordered + last."""
 
-from app.contracts.types import Message
+from app.contracts import Message
 from app.core.prompts import SYSTEM_PROMPT, build_input
 from app.core.prompts.assembly import prompt_cache_key
 

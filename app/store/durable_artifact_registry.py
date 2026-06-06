@@ -1,10 +1,12 @@
-from typing import List, Optional
 
-from sqlalchemy import select, insert, update
+import builtins
 
-from ..contracts.stores import ArtifactRegistry as IArtifactRegistry, Artifact
-from ..store.db import Artifact as ArtifactModel
+from sqlalchemy import insert, select, update
+
 from ..contracts.context import RequestContext
+from ..contracts.stores import Artifact
+from ..contracts.stores import ArtifactRegistry as IArtifactRegistry
+from ..store.db import Artifact as ArtifactModel
 
 
 class DurableArtifactRegistry(IArtifactRegistry):
@@ -40,7 +42,7 @@ class DurableArtifactRegistry(IArtifactRegistry):
             await session.commit()
         return art.id
 
-    async def get(self, ctx: RequestContext, artifact_id: str) -> Optional[Artifact]:
+    async def get(self, ctx: RequestContext, artifact_id: str) -> Artifact | None:
         async with self.session_factory() as session:
             stmt = select(ArtifactModel).where(
                 ArtifactModel.id == artifact_id,
@@ -81,7 +83,7 @@ class DurableArtifactRegistry(IArtifactRegistry):
             raise ValueError(f"Artifact {artifact_id} not found after update")
         return updated
 
-    async def list(self, ctx: RequestContext, *, type: str | None = None) -> List[Artifact]:
+    async def list(self, ctx: RequestContext, *, type: str | None = None) -> list[Artifact]:
         async with self.session_factory() as session:
             stmt = select(ArtifactModel).where(ArtifactModel.tenant_key == ctx.tenant_key)
             if type:
@@ -110,7 +112,7 @@ class DurableArtifactRegistry(IArtifactRegistry):
     def _focus_key(self, ctx: RequestContext) -> str:
         return f"focus:{ctx.tenant_key}:{ctx.user_id}:{ctx.session_id}"
 
-    async def focus(self, ctx: RequestContext) -> List[str]:
+    async def focus(self, ctx: RequestContext) -> builtins.list[str]:
         """Return the top-of-focus-stack artifact IDs (most recently pushed first)."""
         key = self._focus_key(ctx)
         raw = await self.redis.lrange(key, 0, 4)  # top 5

@@ -1,7 +1,7 @@
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import String, Integer, JSON, DateTime, ForeignKey, Float, Text
 from datetime import datetime, timezone
-from typing import Optional
+
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
@@ -21,7 +21,7 @@ class Session(Base, TenantMixin):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
     )
-    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Message(Base, TenantMixin):
@@ -31,7 +31,7 @@ class Message(Base, TenantMixin):
     session_id: Mapped[str] = mapped_column(String(36), ForeignKey("sessions.id"), nullable=False)
     role: Mapped[str] = mapped_column(String(32), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    meta: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
     )
@@ -68,11 +68,11 @@ class AuditLog(Base, TenantMixin):
     session_id: Mapped[str] = mapped_column(String(36), nullable=False)
     request_id: Mapped[str] = mapped_column(String(36), nullable=False)
     action: Mapped[str] = mapped_column(String(128), nullable=False)
-    tool: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    tool: Mapped[str | None] = mapped_column(String(128), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
-    model: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    cost: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cost: Mapped[float | None] = mapped_column(Float, nullable=True)
     timestamp: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
     )
@@ -88,7 +88,7 @@ class PendingAction(Base, TenantMixin):
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)  # sha256 hex of canonical payload
     confirm_token: Mapped[str] = mapped_column(String(64), nullable=False)  # secrets.token_urlsafe(32), one-time
     status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)  # pending|confirmed|rejected
-    preview_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)   # PreviewRender for the UI
+    preview_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)   # PreviewRender for the UI
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
     )
@@ -104,7 +104,7 @@ class FileMeta(Base, TenantMixin):
     storage_path: Mapped[str] = mapped_column(String(1024), nullable=False)  # server-side path, never exposed
     extraction_status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
     # pending | extracting | indexed | failed
-    job_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)  # ARQ job ID for progress polling
+    job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)  # ARQ job ID for progress polling
     user_id: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc), nullable=False

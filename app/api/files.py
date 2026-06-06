@@ -17,7 +17,6 @@ After validation:
 
 import io
 import logging
-import os
 import uuid
 import zipfile
 from pathlib import Path
@@ -242,8 +241,10 @@ def _validate_ooxml(content: bytes, suffix: str) -> None:
                     detail=f"File is not a valid {suffix.lstrip('.')} document (missing OOXML structure).",
                 )
 
-    except zipfile.BadZipFile:
-        raise HTTPException(status_code=400, detail="File is not a valid ZIP/OOXML container.")
+    except zipfile.BadZipFile as err:
+        raise HTTPException(
+            status_code=400, detail="File is not a valid ZIP/OOXML container."
+        ) from err
 
 
 def _suffix_to_mime(suffix: str) -> str:

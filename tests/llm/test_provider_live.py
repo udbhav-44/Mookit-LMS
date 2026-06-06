@@ -10,9 +10,8 @@ import os
 import pytest
 
 from app.config import get_settings
-from app.contracts.types import AssistantDelta, ResponseCompleted
 from app.core.prompts import SYSTEM_PROMPT, build_input
-from app.llm.openai_provider import OpenAIProvider
+from app.llm.openai import OpenAIProvider
 
 pytestmark = pytest.mark.live
 
@@ -22,20 +21,21 @@ async def test_live_prose_stream() -> None:
     from openai import AsyncOpenAI
 
     settings = get_settings()
-    client = AsyncOpenAI(api_key=settings.openai_api_key)
-    provider = OpenAIProvider(client, default_model=settings.fast_model)
+    client = AsyncOpenAI(api_key=settings.openai.api_key.get_secret_value())
+    provider = OpenAIProvider(client, default_model=settings.openai.fast_model)
 
     text_parts: list[str] = []
     completed = False
     events = provider.respond(
         instructions=SYSTEM_PROMPT,
         input=build_input(manifest=None, transcript=[], user_turn="Reply with exactly: pong"),
+        tools=[],
         temperature=0.0,
     )
     async for ev in events:
-        if isinstance(ev, AssistantDelta):
-            text_parts.append(ev.text)
-        elif isinstance(ev, ResponseCompleted):
+        if ev.event_type == "assistant_delta":
+            text_parts.append(ev.data["text"])
+        elif ev.event_type == "response_completed":
             completed = True
     assert completed
     assert "pong" in "".join(text_parts).lower()

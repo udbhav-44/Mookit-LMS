@@ -1,6 +1,6 @@
 """B1.3 acceptance — single resolve, ambiguity→confirm, type-mismatch, manifest formatting."""
 
-from app.contracts.types import Artifact
+from app.contracts import Artifact
 from app.core.reference_resolver import ReferenceResolver
 from tests.fakes.fake_stores import InMemoryArtifactRegistry
 

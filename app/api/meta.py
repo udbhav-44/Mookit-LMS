@@ -23,6 +23,7 @@ async def get_meta(
     instance_config: dict = {}
     try:
         from sqlalchemy import select
+
         from ..store.db import InstanceRegistry
         async with request.app.state.session_factory() as db:
             result = await db.execute(

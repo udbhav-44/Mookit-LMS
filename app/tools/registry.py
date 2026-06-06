@@ -9,7 +9,7 @@ tools may omit it (always visible). A tool whose permission the user lacks is hi
 
 from __future__ import annotations
 
-from app.contracts.types import PermissionMatrix, Tool
+from app.contracts import PermissionMatrix, Tool
 
 
 class UnknownToolError(KeyError):
@@ -45,7 +45,7 @@ class ToolRegistry:
             req = _required_permission(tool)
             if req is None or tool.risk_tier == "read":
                 visible.append(tool)
-            elif perms.can(req[0], req[1]):
+            elif perms.has_permission(req[0], req[1]):
                 visible.append(tool)
         return visible
 

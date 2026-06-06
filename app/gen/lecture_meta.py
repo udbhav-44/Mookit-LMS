@@ -11,8 +11,8 @@ from typing import Protocol
 
 from pydantic import BaseModel
 
+from app.contracts import RequestContext
 from app.contracts.mookit import MooKitClient
-from app.contracts.types import RequestContext
 
 
 class LectureMeta(BaseModel):
@@ -71,8 +71,8 @@ async def _resolve(
 ) -> tuple[int | None, bool, list[dict]]:
     terms = await mookit.list_taxonomy(ctx, type_)
     norm = " ".join(label.lower().split())
-    exact = [t for t in terms if " ".join(t.title.lower().split()) == norm]
-    candidates = [{"id": t.id, "title": t.title} for t in terms]
+    exact = [t for t in terms if " ".join(t.name.lower().split()) == norm]
+    candidates = [{"id": t.id, "title": t.name} for t in terms]
     if exact:
         return exact[0].id, False, candidates
     return None, True, candidates

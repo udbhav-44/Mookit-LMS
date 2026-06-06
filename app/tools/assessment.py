@@ -11,11 +11,12 @@ publish via PUT (published.status=1). The tool only describes the payload; the g
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from pydantic import BaseModel
 
-from app.contracts.types import (
+from app.contracts import (
     ArtifactRegistry,
     ProposedAction,
     RequestContext,
@@ -28,6 +29,29 @@ from app.gen.quiz.pipeline import QuizPipeline
 from app.gen.quiz.schemas import SCHEMA_BY_TYPE
 from app.llm.schema import strict_schema
 from app.preview.render import build_assessment_preview
+
+_DAY = 86400
+
+
+def _default_assessment_create(title: str) -> dict[str, Any]:
+    """An AssessmentCreate-compatible body with sensible default dates (draft status=0)."""
+    now = int(time.time())
+    return {
+        "title": title,
+        "startDate": now,
+        "endDate": now + 7 * _DAY,
+        "endDapDate": now + 7 * _DAY,
+        "resultsDate": now + 8 * _DAY,
+        "published": {"status": 0, "releaseOn": None},
+        "timed": 0,
+        "retakeAllowed": 0,
+        "showCorrectAnswers": 0,
+        "misconductDetection": 0,
+        "minimumOofTimeMs": 5000,
+        "secureExamBrowser": 0,
+        "calculatorEnabled": 0,
+        "restrictSingleIp": 0,
+    }
 
 
 class CreateQuizArgs(BaseModel):
@@ -130,11 +154,15 @@ class PublishAssessmentTool(Tool):
             raise KeyError(parsed.draft_id)
 
         questions = draft.payload.get("questions", [])
-        mookit_questions = [_to_mookit_question(q) for q in questions]
+        mookit_questions = [_to_question_create(q) for q in questions]
+        citations = [q.get("citation") for q in questions]
+        # Executor-compatible composite payload: create assessment (status 0) → add questions →
+        # publish (status 1). Magic key `_type` selects quizzes|exams|assignments.
         payload: dict[str, Any] = {
-            "assessment": {"title": draft.title, "published": {"status": 1}},
+            "_type": parsed.assessment_type,
+            "assessment": _default_assessment_create(draft.title),
             "questions": mookit_questions,
-            "section_id": 0,
+            "citations": citations,        # carried for audit/provenance; not sent to QuestionCreate
             "provenance": draft.provenance,
         }
         preview = build_assessment_preview(title=draft.title, questions=questions)
@@ -147,11 +175,14 @@ class PublishAssessmentTool(Tool):
         )
 
 
-def _to_mookit_question(q: dict[str, Any]) -> dict[str, Any]:
-    """Rebuild a typed question from its stored dict and emit the exact mooKIT payload."""
+def _to_question_create(q: dict[str, Any]) -> dict[str, Any]:
+    """Produce a QuestionCreate-compatible dict (mooKIT schema) from a stored question."""
     schema = SCHEMA_BY_TYPE[q["questionType"]]
     model = schema.model_validate(q)
     body = model.to_mookit_payload()
-    # Carry the source citation through to the committed object metadata.
-    body["_citation"] = q.get("citation")
+    body["published"] = {"status": 1}
+    # mooKIT FibBlankInput.answers is list[str]; flatten our richer blank answers.
+    if body.get("questionType") == "fib" and "blanks" in body:
+        for blank in body["blanks"]:
+            blank["answers"] = [a["answerText"] for a in blank.get("answers", [])]
     return body

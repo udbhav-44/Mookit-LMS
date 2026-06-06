@@ -21,9 +21,9 @@ For production: replace the Redis list with pgvector embeddings; the interface
 """
 
 import json
-import re
 import logging
-from typing import List, Dict, Any
+import re
+from typing import Any
 
 import redis.asyncio as aioredis
 
@@ -54,10 +54,9 @@ class RAGStore:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def chunk_text(text: str) -> List[Dict[str, Any]]:
+    def chunk_text(text: str) -> list[dict[str, Any]]:
         """Split `text` into overlapping chunks and return chunk dicts."""
-        chunks: List[Dict[str, Any]] = []
-        start = 0
+        chunks: list[dict[str, Any]] = []
         chunk_index = 0
 
         # Split on paragraph boundaries first, then hard-cut if necessary.
@@ -94,7 +93,7 @@ class RAGStore:
         return chunks
 
     async def store_chunks(
-        self, ctx: RequestContext, doc_artifact_id: str, chunks: List[Dict[str, Any]]
+        self, ctx: RequestContext, doc_artifact_id: str, chunks: list[dict[str, Any]]
     ) -> None:
         """Persist `chunks` for document `doc_artifact_id` under this tenant."""
         key = self._chunks_key(ctx.tenant_key, doc_artifact_id)
@@ -105,9 +104,9 @@ class RAGStore:
         pipe.expire(key, 7 * 86400)  # 1 week TTL
         await pipe.execute()
 
-    async def save_metadata(self, ctx: RequestContext, doc_artifact_id: str, metadata: Dict[str, Any]) -> None:
+    async def save_metadata(self, ctx: RequestContext, doc_artifact_id: str, metadata: dict[str, Any]) -> None:
         key = self._meta_key(ctx.tenant_key, doc_artifact_id)
-        await self.redis.hset(key, mapping={k: str(v) for k, v in metadata.items()})
+        await self.redis.hset(key, mapping={k: str(v) for k, v in metadata.items()})  # type: ignore[misc]
         await self.redis.expire(key, 7 * 86400)
 
     # ------------------------------------------------------------------
@@ -116,7 +115,7 @@ class RAGStore:
 
     async def retrieve(
         self, ctx: RequestContext, doc_artifact_id: str, query: str, k: int = 5
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Return up to k chunks most relevant to `query`.
 
         Enforces tenant isolation: key is scoped to ctx.tenant_key so a cross-tenant
@@ -126,14 +125,14 @@ class RAGStore:
         Replace with embedding cosine similarity when pgvector is available.
         """
         key = self._chunks_key(ctx.tenant_key, doc_artifact_id)
-        raw = await self.redis.lrange(key, 0, -1)
+        raw = await self.redis.lrange(key, 0, -1)  # type: ignore[misc]
         if not raw:
             return []
 
         chunks = [json.loads(r) for r in raw]
         query_words = set(re.findall(r"\w+", query.lower()))
 
-        scored: List[tuple[float, Dict[str, Any]]] = []
+        scored: list[tuple[float, dict[str, Any]]] = []
         for chunk in chunks:
             text_words = set(re.findall(r"\w+", chunk["text"].lower()))
             if query_words:
@@ -145,7 +144,7 @@ class RAGStore:
         scored.sort(key=lambda x: -x[0])
         return [c for _, c in scored[:k]]
 
-    async def list_documents(self, ctx: RequestContext) -> List[str]:
+    async def list_documents(self, ctx: RequestContext) -> list[str]:
         """List all document IDs indexed under this tenant."""
         pattern = f"rag:{ctx.tenant_key}:*:chunks"
         keys = await self.redis.keys(pattern)

@@ -1,10 +1,10 @@
-import uuid
-import logging
 import contextvars
+import logging
+import uuid
 
-from fastapi import Request, HTTPException
+from fastapi import HTTPException, Request
 
-from ..contracts.context import RequestContext, PermissionMatrix
+from ..contracts.context import PermissionMatrix, RequestContext
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +38,8 @@ async def get_request_context(request: Request) -> RequestContext:
 
     try:
         user_id = int(uid_raw)
-    except ValueError:
-        raise HTTPException(status_code=401, detail="Invalid uid header: must be an integer")
+    except ValueError as err:
+        raise HTTPException(status_code=401, detail="Invalid uid header: must be an integer") from err
 
     # Body is optional — some endpoints (e.g. file upload) don't have a JSON body.
     try:

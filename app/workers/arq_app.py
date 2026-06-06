@@ -23,12 +23,12 @@ import logging
 import httpx
 import redis.asyncio as aioredis
 from arq.connections import RedisSettings
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ..config import settings
-from ..files.sandbox import ExtractionSandbox, ExtractionError
-from ..store.rag_store import RAGStore
+from ..files.sandbox import ExtractionError, ExtractionSandbox
 from ..store.db import FileMeta
+from ..store.rag_store import RAGStore
 
 logger = logging.getLogger(__name__)
 
@@ -135,9 +135,9 @@ async def create_questions_bulk(
     redis: aioredis.Redis = ctx["redis"]
     http: httpx.AsyncClient = ctx["http"]
 
+    from ..contracts.context import PermissionMatrix, RequestContext
     from ..mookit.client import MooKitClient
     from ..mookit.schemas import QuestionCreate
-    from ..contracts.context import RequestContext, PermissionMatrix
 
     # Reconstruct a minimal RequestContext for the mooKIT client.
     req_ctx = RequestContext(
@@ -196,7 +196,7 @@ async def startup(ctx: dict) -> None:
     ctx["redis"] = aioredis.from_url(settings.redis.url, decode_responses=True)
     ctx["http"] = httpx.AsyncClient(
         http2=True,
-        limits=httpx.Limits(max_connections=50, max_keepalive=20),
+        limits=httpx.Limits(max_connections=50, max_keepalive_connections=20),
         timeout=httpx.Timeout(connect=5.0, read=60.0, write=10.0, pool=5.0),
     )
     engine = create_async_engine(settings.db.url, pool_size=5, max_overflow=5)

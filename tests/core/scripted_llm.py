@@ -1,7 +1,7 @@
 """A scripted LLMProvider for orchestrator tests.
 
-Each call to ``respond`` pops the next scripted "round" (a list of LLMEvents) so multi-round
-plan-execute loops can be exercised deterministically. Records the kwargs of each respond call.
+Emits the canonical generic ``LLMEvent(event_type, data)`` stream. Each call to ``respond`` pops the
+next scripted "round" so multi-round plan-execute loops can be exercised deterministically.
 """
 
 from __future__ import annotations
@@ -9,27 +9,24 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any
 
-from app.contracts.types import (
-    AssistantDelta,
-    LLMEvent,
-    LLMProvider,
-    ResponseCompleted,
-    ToolCallArgsDone,
-    ToolCallStarted,
-)
+from app.contracts.llm import LLMEvent, LLMProvider
 
 
 def prose_round(text: str, *, response_id: str = "resp") -> list[LLMEvent]:
-    return [AssistantDelta(text=text), ResponseCompleted(response_id=response_id)]
-
-
-def tool_round(
-    *, name: str, call_id: str, arguments: dict, response_id: str = "resp"
-) -> list[LLMEvent]:
     return [
-        ToolCallStarted(call_id=call_id, name=name),
-        ToolCallArgsDone(call_id=call_id, name=name, arguments=arguments),
-        ResponseCompleted(response_id=response_id),
+        LLMEvent(event_type="assistant_delta", data={"text": text}),
+        LLMEvent(event_type="response_completed", data={"response_id": response_id}),
+    ]
+
+
+def tool_round(*, name: str, call_id: str, arguments: dict, response_id: str = "resp") -> list[LLMEvent]:
+    return [
+        LLMEvent(event_type="tool_call_started", data={"call_id": call_id, "name": name}),
+        LLMEvent(
+            event_type="tool_call_args_done",
+            data={"call_id": call_id, "name": name, "arguments": arguments},
+        ),
+        LLMEvent(event_type="response_completed", data={"response_id": response_id}),
     ]
 
 

@@ -1,6 +1,6 @@
-from .client import MooKitClient, FakeMooKitClient
-from .errors import MooKitError, MooKitAuthError, MooKitNotFoundError, MooKitServerError
-from .schemas import AnnouncementUpdate, CourseResourceCreate, McqOptionInput, FibBlankInput
+from .client import FakeMooKitClient, MooKitClient
+from .errors import MooKitAuthError, MooKitError, MooKitNotFoundError, MooKitServerError
+from .schemas import AnnouncementUpdate, CourseResourceCreate, FibBlankInput, McqOptionInput
 
 __all__ = [
     "MooKitClient", "FakeMooKitClient",
