@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field, SecretStr
+import os
+
+from pydantic import BaseModel, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Bumped whenever the static system prompt / tool-schema preamble changes (cache-busting).
@@ -76,6 +78,15 @@ class Settings(BaseSettings):
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
+
+    @model_validator(mode="after")
+    def _openai_key_fallback(self) -> "Settings":
+        # Accept the flat OPENAI_API_KEY (common .env convention) in addition to nested OPENAI__API_KEY.
+        if self.openai.api_key.get_secret_value() in ("", "sk-placeholder"):
+            flat = os.getenv("OPENAI_API_KEY")
+            if flat:
+                self.openai.api_key = SecretStr(flat)
+        return self
 
 
 settings = Settings()

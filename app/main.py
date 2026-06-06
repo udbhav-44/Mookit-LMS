@@ -121,6 +121,15 @@ async def lifespan(app: FastAPI):
         app.state.db_engine, expire_on_commit=False
     )
 
+    # Create tables if absent (idempotent) so the stack runs out-of-the-box.
+    try:
+        from .store.db import Base
+        async with app.state.db_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database schema ensured.")
+    except Exception as exc:
+        logger.warning("DB schema init skipped/failed: %s", exc)
+
     # 4. ARQ job queue.
     try:
         app.state.arq_pool = await create_pool(RedisSettings.from_dsn(settings.redis.url))
@@ -214,6 +223,16 @@ app.include_router(sessions.router, prefix="/v1/sessions", tags=["sessions"])
 app.include_router(files.router,    prefix="/v1",          tags=["files"])
 app.include_router(confirm.router,  prefix="/v1",          tags=["confirm"])
 app.include_router(meta.router,     prefix="/v1",          tags=["meta"])
+
+# ── Sample UI (static) ────────────────────────────────────────────────────────
+# Served at /ui for local demos; the production chat UI is built by the mooKIT frontend team.
+import os as _os  # noqa: E402
+
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+
+_ui_dir = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "sample-ui")
+if _os.path.isdir(_ui_dir):
+    app.mount("/ui", StaticFiles(directory=_ui_dir, html=True), name="sample-ui")
 
 # ── Global exception handler ──────────────────────────────────────────────────
 

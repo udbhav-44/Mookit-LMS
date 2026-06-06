@@ -136,6 +136,21 @@ async def upload_file(
             )
             await session.commit()
 
+    # Register an uploaded_file artifact so the orchestrator's manifest (Dev B) can reference it,
+    # enabling "create a quiz from this document". The RAG chunks are keyed by file_id == doc id.
+    registry = getattr(request.app.state, "artifact_registry", None)
+    if registry is not None:
+        from app.contracts import Artifact
+        try:
+            await registry.add(ctx, Artifact(
+                id=file_id, type="uploaded_file", title=original_name, status="uploaded",
+                provenance={"created_by": ctx.user_id, "ai_generated": False},
+                payload={"filename": original_name, "mime_type": _suffix_to_mime(suffix)},
+                namespaced_id=f"{ctx.tenant_key}:{ctx.user_id}:{file_id}",
+            ))
+        except Exception as exc:
+            logger.warning("Failed to register uploaded_file artifact %s: %s", file_id, exc)
+
     audit = getattr(request.app.state, "audit_logger", None)
     if audit:
         await audit.log(ctx, action="file_upload", tool="upload_file", status="success")

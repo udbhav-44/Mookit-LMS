@@ -28,6 +28,7 @@ COPY --from=builder /build/.venv /app/.venv
 # Copy application source.
 COPY app/ ./app/
 COPY scripts/ ./scripts/
+COPY sample-ui/ ./sample-ui/
 
 # Use the venv Python.
 ENV PATH="/app/.venv/bin:$PATH" \

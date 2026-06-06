@@ -1,4 +1,13 @@
-# Sample UI — Editable Quiz Preview (Dev B)
+# Sample UI
+
+Two pieces:
+- **`../index.html`** — a zero-build vanilla-JS chat client (streaming chat, file upload, confirm
+  dialog with audience chip / diff). Served at `/ui` by the running service. Use this for the live demo.
+- **`./` (this folder)** — the richer **editable quiz-preview** React component below (build with npm).
+
+---
+
+# Editable Quiz Preview (Dev B)
 
 The editable quiz-preview component + confirm dialog from the Dev B deliverables (B5.3). This is a
 **sample/test** UI; the production chat UI is built by the mooKIT frontend team.
