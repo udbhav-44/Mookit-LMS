@@ -8,12 +8,13 @@ RUN pip install --no-cache-dir uv
 
 COPY pyproject.toml ./
 
-# Create a virtual-env inside /build/.venv so we can copy it to the final image.
+# Build the venv at the SAME path it will live at runtime (/app/.venv) and make it --relocatable,
+# so the console-script shebangs (e.g. uvicorn) resolve correctly after the copy.
 # (Resolve runtime deps from pyproject via `uv pip compile`; avoids bash process-substitution,
 # which fails under the /bin/sh used by RUN, and needs no lockfile.)
-RUN uv venv .venv && \
+RUN uv venv --relocatable /app/.venv && \
     uv pip compile pyproject.toml --output-file /build/requirements.txt && \
-    uv pip install --python .venv/bin/python --no-cache -r /build/requirements.txt
+    uv pip install --python /app/.venv/bin/python --no-cache -r /build/requirements.txt
 
 # ── Stage 2: runtime image ────────────────────────────────────────────────────
 FROM python:3.12-slim
@@ -25,8 +26,8 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# Copy only the installed packages from the builder stage.
-COPY --from=builder /build/.venv /app/.venv
+# Copy only the installed packages from the builder stage (same path → shebangs stay valid).
+COPY --from=builder /app/.venv /app/.venv
 
 # Copy application source.
 COPY app/ ./app/
@@ -49,7 +50,7 @@ EXPOSE 8000
 
 # Graceful drain: uvicorn's --timeout-graceful-shutdown gives in-flight SSE
 # streams time to finish before the process exits.
-CMD ["uvicorn", "app.main:app", \
+CMD ["/app/.venv/bin/python", "-m", "uvicorn", "app.main:app", \
      "--host", "0.0.0.0", \
      "--port", "8000", \
      "--workers", "1", \
