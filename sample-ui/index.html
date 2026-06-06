@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <title>mooKIT AI Assistant — Sample Chat</title>
 <style>
   :root { --bg:#0f1117; --panel:#171a23; --panel2:#1f2330; --txt:#e8eaf0; --muted:#8b93a7;
@@ -21,6 +22,10 @@
   .msg { padding:10px 14px; border-radius:10px; max-width:80%; white-space:pre-wrap; }
   .msg.user { align-self:flex-end; background:var(--accent); color:#fff; }
   .msg.assistant { align-self:flex-start; background:var(--panel2); border:1px solid var(--border); }
+  .msg.draft-preview { max-width:100%; width:100%; }
+  .msg.draft-preview .draft-title { font-weight:600; margin-bottom:6px; }
+  .msg.draft-preview .draft-body { margin-top:10px; padding:10px 12px; background:var(--panel);
+    border:1px solid var(--border); border-radius:8px; white-space:pre-wrap; line-height:1.45; }
   .chip { display:inline-block; font-size:11px; color:var(--muted); background:var(--panel);
           border:1px solid var(--border); border-radius:20px; padding:2px 10px; margin:2px 0; align-self:flex-start; }
   .chip.tool { color:var(--accent2); }
@@ -35,10 +40,11 @@
   button.danger { background:var(--danger); }
   button:disabled { opacity:.5; cursor:not-allowed; }
   .files { display:flex; gap:8px; align-items:center; margin-top:6px; color:var(--muted); font-size:12px; }
-  /* confirm modal */
-  #overlay { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center;
-             justify-content:center; padding:20px; }
-  #overlay.show { display:flex; }
+  /* confirm modal — hidden overlay must NOT block clicks */
+  #overlay { position:fixed; inset:0; z-index:1000; background:rgba(0,0,0,.6); display:none;
+             align-items:center; justify-content:center; padding:20px;
+             pointer-events:none; visibility:hidden; }
+  #overlay.show { display:flex; pointer-events:auto; visibility:visible; }
   .modal { background:var(--panel); border:1px solid var(--border); border-radius:12px; max-width:560px;
            width:100%; padding:20px; max-height:85vh; overflow:auto; }
   .modal h3 { margin:0 0 8px; }
@@ -50,6 +56,8 @@
   table.diff { width:100%; border-collapse:collapse; margin:10px 0; font-size:13px; }
   table.diff th, table.diff td { border:1px solid var(--border); padding:5px 8px; text-align:left; }
   .actions { display:flex; gap:10px; justify-content:flex-end; margin-top:16px; }
+  .quick-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; align-self:flex-start; }
+  .quick-actions button { font-size:13px; padding:8px 14px; }
 </style>
 </head>
 <body>
@@ -57,7 +65,7 @@
   <h1>mooKIT AI Assistant</h1>
   <span class="sub">sample chat · "we make suggestions, you make decisions"</span>
   <div class="cfg">
-    <input id="cfg-base" placeholder="service URL" value="http://localhost:8000" />
+    <input id="cfg-base" placeholder="service URL" value="" title="Auto-filled from this page's host when served at /ui" />
     <input id="cfg-course" placeholder="course" value="coursetest" />
     <input id="cfg-uid" placeholder="uid" value="1" />
     <input id="cfg-token" placeholder="token (JWT)" value="" />
@@ -97,7 +105,7 @@ function addMsg(role, text="") {
   el.className = "msg " + role;
   el.textContent = text;
   log.appendChild(el);
-  log.scrollIntoView({block:"end"});
+  scrollLog();
   return el;
 }
 function addChip(text, kind="") {
@@ -105,8 +113,27 @@ function addChip(text, kind="") {
   el.className = "chip " + kind;
   el.textContent = text;
   log.appendChild(el);
-  log.scrollIntoView({block:"end"});
+  scrollLog();
   return el;
+}
+
+function scrollLog() {
+  window.requestAnimationFrame(() => log.lastElementChild?.scrollIntoView({block:"nearest", behavior:"smooth"}));
+}
+
+function addQuickActions(buttons) {
+  const row = document.createElement("div");
+  row.className = "quick-actions";
+  for (const b of buttons) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = b.secondary ? "secondary" : "";
+    btn.textContent = b.label;
+    btn.onclick = () => { $("input").value = b.message; $("chat").requestSubmit(); };
+    row.appendChild(btn);
+  }
+  log.appendChild(row);
+  scrollLog();
 }
 
 // ---- File upload -------------------------------------------------------
@@ -149,9 +176,12 @@ function showConfirm(d) {
   $("overlay").classList.add("show");
   $("btn-reject").onclick = () => resolveAction(d, false);
   $("btn-confirm").onclick = () => resolveAction(d, true);
+  // Click dimmed backdrop to dismiss (same as Cancel)
+  $("overlay").onclick = (e) => { if (e.target === $("overlay")) resolveAction(d, false); };
 }
 async function resolveAction(d, confirm) {
   $("overlay").classList.remove("show");
+  $("overlay").onclick = null;
   const verb = confirm ? "confirm" : "reject";
   try {
     const r = await fetch(`${baseUrl()}/v1/actions/${d.action_id}/${verb}`, {
@@ -159,21 +189,136 @@ async function resolveAction(d, confirm) {
       body: JSON.stringify(confirm ? { confirm_token: d.confirm_token } : {}),
     });
     const j = await r.json();
-    addChip(confirm ? `✅ ${d.action} confirmed → ${JSON.stringify(j.data||j).slice(0,80)}`
-                    : `🚫 ${d.action} cancelled`, confirm ? "artifact":"");
+    const payload = j.data || j;
+    if (confirm && d.action === "send_announcement" && payload && payload.title) {
+      addChip(`✅ Announcement sent (id ${payload.id}): "${payload.title}"`, "artifact");
+    } else {
+      addChip(confirm ? `✅ ${d.action} confirmed` : `🚫 ${d.action} cancelled`, confirm ? "artifact":"");
+    }
   } catch (e) { addChip("confirm failed: " + e.message, "err"); }
 }
 function escapeHtml(s){ return s.replace(/[&<>]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
 
+function showArtifactPreview(p, type, payload) {
+  const card = document.createElement("div");
+  card.className = "msg assistant draft-preview";
+  let html = "";
+  if (type === "announcement_draft" && payload) {
+    html += `<div class="draft-title">📋 Draft announcement</div>`;
+    html += `<div style="color:var(--muted);font-size:12px;margin-bottom:10px">This is exactly what will be posted to mooKIT if you confirm send.</div>`;
+    if (p.audience) html += `<div class="audience">To: ${escapeHtml(p.audience)}</div>`;
+    if (p.summary_lines && p.summary_lines.length)
+      html += "<ul style='margin:8px 0;padding-left:18px;color:var(--muted)'>" +
+        p.summary_lines.map(s => `<li>${escapeHtml(s)}</li>`).join("") + "</ul>";
+    html += `<div style="font-size:12px;color:var(--muted);margin-top:8px">Subject (mooKIT <code>title</code>)</div>`;
+    html += `<div class="draft-body">${escapeHtml(payload.title || "")}</div>`;
+    html += `<div style="font-size:12px;color:var(--muted);margin-top:10px">Body (mooKIT <code>description</code>)</div>`;
+    html += `<div class="draft-body">${escapeHtml(payload.description || "")}</div>`;
+  } else {
+    html += `<div class="draft-title">📋 ${escapeHtml(p.title || type)}</div>`;
+    if (p.audience) html += `<div class="audience">To: ${escapeHtml(p.audience)}</div>`;
+    if (p.summary_lines && p.summary_lines.length)
+      html += "<ul style='margin:8px 0;padding-left:18px;color:var(--muted)'>" +
+        p.summary_lines.map(s => `<li>${escapeHtml(s)}</li>`).join("") + "</ul>";
+    if (p.body_markdown)
+      html += `<div class="draft-body">${escapeHtml(p.body_markdown)}</div>`;
+  }
+  if (p.warnings && p.warnings.length)
+    html += "<ul style='color:var(--warn);margin:8px 0'>" +
+      p.warnings.map(w => `<li>⚠ ${escapeHtml(w)}</li>`).join("") + "</ul>";
+  card.innerHTML = html;
+  log.appendChild(card);
+  scrollLog();
+}
+
 // ---- Chat (SSE over fetch streaming) -----------------------------------
+(function initConfig() {
+  const params = new URLSearchParams(location.search);
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem("mookit-ui-cfg") || "{}"); } catch {}
+  const origin = location.origin;
+  if (origin && origin !== "null" && !origin.startsWith("file:")) {
+    $("cfg-base").placeholder = origin;
+    $("cfg-base").value = saved.base || origin;
+  } else {
+    $("cfg-base").value = saved.base || "http://localhost:8000";
+  }
+  if (saved.course) $("cfg-course").value = saved.course;
+  if (saved.uid) $("cfg-uid").value = saved.uid;
+  const token = params.get("token") || saved.token || "";
+  if (token) $("cfg-token").value = token;
+  function persist() {
+    localStorage.setItem("mookit-ui-cfg", JSON.stringify({
+      base: $("cfg-base").value.trim(),
+      course: $("cfg-course").value.trim(),
+      uid: $("cfg-uid").value.trim(),
+      token: $("cfg-token").value.trim(),
+    }));
+  }
+  ["cfg-base", "cfg-course", "cfg-uid", "cfg-token"].forEach((id) => {
+    $(id).addEventListener("change", persist);
+    $(id).addEventListener("input", persist);
+  });
+})();
+
+function parseSseFrames(buffer) {
+  // sse-starlette terminates frames with CRLF (\\r\\n\\r\\n). Normalise first.
+  const norm = buffer.replace(/\r\n/g, "\n");
+  const parts = norm.split("\n\n");
+  const rest = parts.pop() || "";
+  return { frames: parts.filter(Boolean), rest };
+}
+
+function handleSseFrame(frame, state) {
+  let ev = "message", data = "";
+  for (const line of frame.split("\n")) {
+    if (!line || line.startsWith(":")) continue; // comment / ping line
+    if (line.startsWith("event:")) ev = line.slice(6).trim();
+    else if (line.startsWith("data:")) data += (data ? "\n" : "") + line.slice(5).trim();
+  }
+  if (!data || data === "ping") return;
+  let d;
+  try { d = JSON.parse(data); } catch (err) {
+    console.warn("SSE JSON parse failed", data, err);
+    addChip("parse error: " + data.slice(0, 80), "err");
+    return;
+  }
+  if (ev === "assistant_delta") {
+    if (!state.assistantEl) state.assistantEl = addMsg("assistant", "");
+    state.assistantEl.textContent += d.text || "";
+    scrollLog();
+  } else if (ev === "tool_started") {
+    addChip("🔧 " + (d.label || d.tool), "tool");
+  } else if (ev === "tool_progress") {
+    addChip(`… ${d.tool}: ${d.message || (d.pct+"%")}`, "tool");
+  } else if (ev === "artifact_updated") {
+    state.lastArtifactType = d.type;
+    addChip(`📝 ${d.type} updated (v${d.version})`, "artifact");
+    if (d.preview) showArtifactPreview(d.preview, d.type, d.payload);
+  } else if (ev === "pending_confirmation") {
+    showConfirm(d);
+  } else if (ev === "error") {
+    addChip(`error: ${d.message || d.code || JSON.stringify(d)}`, "err");
+  } else if (ev === "done") {
+    if (!state.sawDone) {
+      state.sawDone = true;
+      addChip("✓ turn complete", "");
+    }
+  }
+}
+
 $("chat").onsubmit = async (e) => {
   e.preventDefault();
   const text = $("input").value.trim();
   if (!text) return;
+  if (!$("cfg-token").value.trim()) {
+    addChip("missing JWT — paste your mooKIT token in the header field (or ?token=… in the URL)", "err");
+    return;
+  }
   $("input").value = "";
   $("send").disabled = true;
   addMsg("user", text);
-  let assistantEl = null;
+  const state = { assistantEl: null, sawDone: false, lastArtifactType: null };
 
   try {
     const r = await fetch(baseUrl() + "/v1/chat", {
@@ -188,36 +333,30 @@ $("chat").onsubmit = async (e) => {
       const { value, done } = await reader.read();
       if (done) break;
       buf += dec.decode(value, { stream:true });
-      const frames = buf.split("\n\n");
-      buf = frames.pop();
-      for (const frame of frames) handleFrame(frame);
+      const parsed = parseSseFrames(buf);
+      buf = parsed.rest;
+      for (const frame of parsed.frames) handleSseFrame(frame, state);
     }
-  } catch (e) { addChip("stream error: " + e.message, "err"); }
-  $("send").disabled = false;
-
-  function handleFrame(frame) {
-    let ev = "message", data = "";
-    for (const line of frame.split("\n")) {
-      if (line.startsWith("event:")) ev = line.slice(6).trim();
-      else if (line.startsWith("data:")) data += line.slice(5).trim();
+    if (buf.trim()) {
+      const parsed = parseSseFrames(buf + "\n\n");
+      for (const frame of parsed.frames) handleSseFrame(frame, state);
     }
-    if (!data || data === "ping") return;
-    let d; try { d = JSON.parse(data); } catch { return; }
-    if (ev === "assistant_delta") {
-      if (!assistantEl) assistantEl = addMsg("assistant", "");
-      assistantEl.textContent += d.text || "";
-      log.scrollIntoView({block:"end"});
-    } else if (ev === "tool_started") {
-      addChip("🔧 " + (d.label || d.tool), "tool");
-    } else if (ev === "tool_progress") {
-      addChip(`… ${d.tool}: ${d.message || (d.pct+"%")}`, "tool");
-    } else if (ev === "artifact_updated") {
-      addChip(`📝 ${d.type} updated (v${d.version})`, "artifact");
-    } else if (ev === "pending_confirmation") {
-      showConfirm(d);
-    } else if (ev === "error") {
-      addChip(`error: ${d.message}`, "err");
+    if (!state.assistantEl) addChip("(no assistant text — check tool chips above)", "");
+    if (state.lastArtifactType === "announcement_draft") {
+      addQuickActions([
+        { label: "Yes — send announcement", message: "Yes, send the announcement to all students" },
+        { label: "Keep as draft", message: "Keep it as a draft for now", secondary: true },
+      ]);
     }
+  } catch (e) {
+    let msg = e.message || String(e);
+    if (msg === "Failed to fetch") {
+      msg = "cannot reach " + baseUrl() + " — use this page's host in Service URL (not localhost) and ensure the API container is running";
+    }
+    addChip("stream error: " + msg, "err");
+  } finally {
+    $("send").disabled = false;
+    $("input").focus();
   }
 };
 </script>

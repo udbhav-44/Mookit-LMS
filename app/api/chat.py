@@ -26,6 +26,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
@@ -70,9 +71,8 @@ async def chat_endpoint(
             # session store, so we do NOT append here to avoid a duplicate user message. The stub
             # path below persists nothing (temporary).
 
-            # ── Audit: start ──────────────────────────────────────────────────
-            if audit:
-                await audit.log(ctx, action="chat_start", status="in_progress")
+            # ── Audit: start (best-effort) ─────────────────────────────────────
+            await _safe_audit(audit, ctx, action="chat_start", status="in_progress")
 
             # ── Main turn: call the orchestrator if wired, else stub ──────────
             if orchestrator is not None:
@@ -90,21 +90,18 @@ async def chat_endpoint(
                 await asyncio.sleep(0)
 
             # ── Done ──────────────────────────────────────────────────────────
-            if audit:
-                await audit.log(ctx, action="chat_end", status="success")
+            await _safe_audit(audit, ctx, action="chat_end", status="success")
 
             yield _sse("done", {"response_id": ctx.request_id})
 
         except asyncio.CancelledError:
             logger.info("Chat stream cancelled: %s", ctx.request_id)
-            if audit:
-                await audit.log(ctx, action="chat_end", status="cancelled")
+            await _safe_audit(audit, ctx, action="chat_end", status="cancelled")
             raise
 
         except Exception as exc:
             logger.exception("Unhandled error in chat stream %s", ctx.request_id)
-            if audit:
-                await audit.log(ctx, action="chat_end", status="error")
+            await _safe_audit(audit, ctx, action="chat_end", status="error")
             yield _sse("error", {
                 "code": "internal_error",
                 "message": str(exc),
@@ -123,6 +120,16 @@ async def chat_endpoint(
 
 def _sse(event: str, data: dict) -> dict:
     return {"event": event, "data": json.dumps(data)}
+
+
+async def _safe_audit(audit: Any, ctx: RequestContext, **kwargs: Any) -> None:
+    """Write audit row without letting failures abort the SSE stream."""
+    if audit is None:
+        return
+    try:
+        await audit.log(ctx, **kwargs)
+    except Exception as exc:
+        logger.warning("Audit log skipped: %s", exc)
 
 
 async def _send_ping(interval: float, request: Request) -> None:

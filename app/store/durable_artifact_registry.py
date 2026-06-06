@@ -1,5 +1,5 @@
-
 import builtins
+import uuid
 
 from sqlalchemy import insert, select, update
 
@@ -26,9 +26,10 @@ class DurableArtifactRegistry(IArtifactRegistry):
     # ------------------------------------------------------------------
 
     async def add(self, ctx: RequestContext, art: Artifact) -> str:
+        art_id = art.id or str(uuid.uuid4())
         async with self.session_factory() as session:
             stmt = insert(ArtifactModel).values(
-                id=art.id,
+                id=art_id,
                 tenant_key=ctx.tenant_key,
                 type=art.type,
                 title=art.title,
@@ -40,7 +41,8 @@ class DurableArtifactRegistry(IArtifactRegistry):
             )
             await session.execute(stmt)
             await session.commit()
-        return art.id
+        await self.push_focus(ctx, art_id)
+        return art_id
 
     async def get(self, ctx: RequestContext, artifact_id: str) -> Artifact | None:
         async with self.session_factory() as session:

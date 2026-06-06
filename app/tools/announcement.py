@@ -20,7 +20,7 @@ from app.contracts import (
     ToolResult,
 )
 from app.core.hashing import canonical_hash
-from app.gen.announcement import draft_announcement
+from app.gen.announcement import DraftFn, draft_announcement
 from app.gen.provenance import stamp
 from app.llm.schema import strict_schema
 from app.preview.render import build_announcement_preview, sanitize_markdown
@@ -38,12 +38,17 @@ class DraftAnnouncementTool(Tool):
     parameters_schema = strict_schema(DraftAnnouncementArgs)
     required_permission = ("announcements", "create")
 
-    def __init__(self, registry: ArtifactRegistry) -> None:
+    def __init__(self, registry: ArtifactRegistry, *, generator: DraftFn | None = None) -> None:
         self._registry = registry
+        self._generator = generator
 
     async def run(self, ctx: RequestContext, args: dict[str, Any]) -> ToolResult:
         parsed = DraftAnnouncementArgs.model_validate(args)
-        draft = await draft_announcement(intent=parsed.intent, audience_intent=parsed.audience)
+        draft = await draft_announcement(
+            intent=parsed.intent,
+            audience_intent=parsed.audience,
+            generator=self._generator,
+        )
         art = Artifact(
             id="",
             type="announcement_draft",

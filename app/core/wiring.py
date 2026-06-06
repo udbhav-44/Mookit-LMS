@@ -15,6 +15,7 @@ from app.core.confirmation import ConfirmationGate
 from app.core.guardrails import make_openai_guardrail
 from app.core.orchestrator import Orchestrator
 from app.core.reference_resolver import ReferenceResolver
+from app.gen.announcement_generator import OpenAIAnnouncementGenerator
 from app.gen.quiz.generator import OpenAIQuestionGenerator
 from app.gen.quiz.pipeline import QuizPipeline
 from app.llm.openai import OpenAIProvider
@@ -38,8 +39,10 @@ def build_orchestrator(
 ) -> Orchestrator:
     client = openai_client or AsyncOpenAI(api_key=settings.openai.api_key.get_secret_value())
     provider = OpenAIProvider(client, default_model=settings.openai.model)
+    fast_provider = OpenAIProvider(client, default_model=settings.openai.fast_model)
     guardrail_hook = make_openai_guardrail(client)
     generator = OpenAIQuestionGenerator(provider, temperature=settings.openai.quiz_temperature)
+    announcement_generator = OpenAIAnnouncementGenerator(fast_provider, temperature=0.7)
     pipeline = QuizPipeline(retrieve=rag_store.retrieve, generator=generator)
 
     registry = ToolRegistry()
@@ -50,7 +53,7 @@ def build_orchestrator(
     registry.register(CreateQuizTool(pipeline, artifact_registry))
     registry.register(EditQuizTool(pipeline, artifact_registry))
     registry.register(PublishAssessmentTool(artifact_registry))
-    registry.register(DraftAnnouncementTool(artifact_registry))
+    registry.register(DraftAnnouncementTool(artifact_registry, generator=announcement_generator))
     registry.register(SendAnnouncementTool(artifact_registry))
     registry.register(DraftLectureTool(mookit_client, artifact_registry))
     registry.register(PublishLectureTool(artifact_registry))

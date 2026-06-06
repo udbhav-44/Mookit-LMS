@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app.contracts import PreviewRender
+from app.contracts import Artifact, PreviewRender
 
 # Strip markdown links [text](url) -> text and images ![alt](url) -> "" (anti-exfil).
 _MD_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
@@ -98,3 +98,30 @@ def build_lecture_preview(
         body_markdown=sanitize_markdown(description_markdown) if description_markdown else None,
         diff=diff,
     )
+
+
+def preview_from_artifact(art: Artifact) -> PreviewRender | None:
+    """Build a UI-facing preview card for a draft artifact."""
+    p = art.payload
+    if art.type == "announcement_draft":
+        return build_announcement_preview(
+            subject=p.get("title", art.title),
+            body_markdown=p.get("description", ""),
+            channel="email" if p.get("notify_mail") else "lms",
+            audience_label=p.get("audience_intent", "all"),
+            urgent=p.get("type") == "urgent",
+        )
+    if art.type == "lecture_draft":
+        return build_lecture_preview(
+            title=p.get("title", art.title),
+            week_label=p.get("week_label", ""),
+            module_label=p.get("module_label"),
+            visibility=p.get("visibility", "draft"),
+            schedule_label=p.get("release_on"),
+            attachments=[a for a in (p.get("attachments") or []) if isinstance(a, str)],
+            description_markdown=p.get("description"),
+        )
+    if art.type == "assessment_draft":
+        questions = p.get("questions") or []
+        return build_assessment_preview(title=p.get("title", art.title), questions=questions)
+    return None

@@ -26,16 +26,14 @@ class AnnouncementDraft(BaseModel):
 
 
 class DraftFn(Protocol):
-    async def __call__(self, *, intent: str) -> AnnouncementDraft: ...
+    async def __call__(self, *, intent: str, audience_intent: str) -> AnnouncementDraft: ...
 
 
 async def draft_announcement(
     *, intent: str, audience_intent: str = "all", generator: DraftFn | None = None
 ) -> AnnouncementDraft:
     if generator is not None:
-        draft = await generator(intent=intent)
-        # Enforce: audience intent comes from the caller/session, not the generator.
-        return draft.model_copy(update={"audience_intent": audience_intent})
+        return await generator(intent=intent, audience_intent=audience_intent)
     return _default_draft(intent=intent, audience_intent=audience_intent)
 
 

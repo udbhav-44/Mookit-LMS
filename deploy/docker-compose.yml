@@ -1,3 +1,6 @@
+# Use Docker Compose v2: `docker compose` (NOT legacy `docker-compose` v1 — it breaks on Docker 29+).
+# From this directory: docker compose --env-file ../.env up -d --build
+
 services:
 
   # ── mooKIT AI Assistant API ──────────────────────────────────────────────────
@@ -7,6 +10,8 @@ services:
       dockerfile: deploy/Dockerfile
     ports:
       - "8000:8000"
+    env_file:
+      - ../.env
     environment:
       DB__URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/mookit_lms"
       REDIS__URL: "redis://redis:6379/0"
@@ -38,6 +43,8 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
     command: ["python", "-m", "arq", "app.workers.arq_app.WorkerSettings"]
+    env_file:
+      - ../.env
     environment:
       DB__URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/mookit_lms"
       REDIS__URL: "redis://redis:6379/0"

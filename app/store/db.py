@@ -19,7 +19,7 @@ class Session(Base, TenantMixin):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     user_id: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -33,7 +33,7 @@ class Message(Base, TenantMixin):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
 
 
@@ -49,10 +49,10 @@ class Artifact(Base, TenantMixin):
     provenance: Mapped[dict] = mapped_column(JSON, nullable=False)
     user_id: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
@@ -74,7 +74,7 @@ class AuditLog(Base, TenantMixin):
     tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cost: Mapped[float | None] = mapped_column(Float, nullable=True)
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
 
 
@@ -90,7 +90,7 @@ class PendingAction(Base, TenantMixin):
     status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)  # pending|confirmed|rejected
     preview_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)   # PreviewRender for the UI
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
 
 
@@ -107,7 +107,7 @@ class FileMeta(Base, TenantMixin):
     job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)  # ARQ job ID for progress polling
     user_id: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
 
 
@@ -139,5 +139,5 @@ class DocChunk(Base, TenantMixin):
     locator: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)   # {page,para}
     embedding: Mapped[list[float]] = mapped_column(Vector(EMBED_DIM), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )

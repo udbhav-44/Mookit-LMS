@@ -38,6 +38,7 @@ from app.core.memory import TranscriptManager
 from app.core.prompts import SYSTEM_PROMPT, build_input
 from app.core.prompts.assembly import prompt_cache_key
 from app.core.reference_resolver import ReferenceResolver
+from app.preview.render import preview_from_artifact
 from app.tools.registry import ToolRegistry, UnknownToolError
 
 MAX_TOOL_ROUNDS = 8  # safety bound on the plan-execute loop
@@ -246,12 +247,17 @@ class Orchestrator:
         if isinstance(result, ToolResult) and result.artifact_id:
             art = await self._artifacts.get(ctx, result.artifact_id)
             if art is not None:
-                events.append(
-                    OrchestratorEvent(
-                        event="artifact_updated",
-                        data={"artifact_id": art.id, "type": art.type, "version": art.version},
-                    )
-                )
+                data: dict[str, Any] = {
+                    "artifact_id": art.id,
+                    "type": art.type,
+                    "version": art.version,
+                }
+                preview = preview_from_artifact(art)
+                if preview is not None:
+                    data["preview"] = preview.model_dump()
+                if art.type.endswith("_draft"):
+                    data["payload"] = art.payload
+                events.append(OrchestratorEvent(event="artifact_updated", data=data))
         payload = _tool_result_payload(result)
         flags = await self._screen_output(payload)
         if flags:
