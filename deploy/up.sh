@@ -21,13 +21,16 @@ fi
 
 # Remove stale containers left by broken v1 recreate (avoids name/network conflicts).
 sudo docker rm -f \
-  deploy_api_1 deploy_worker_1 deploy_postgres_1 deploy_redis_1 \
+  deploy_api_1 deploy_worker_1 deploy_postgres_1 deploy_redis_1 deploy_pgadmin_1 \
   5c29cb3e4870_deploy_redis_1 f3a30a54a606_deploy_postgres_1 \
   2>/dev/null || true
 
 sudo "${COMPOSE[@]}" down --remove-orphans 2>/dev/null || true
 sudo "${COMPOSE[@]}" up -d --build "$@"
 
+HOST_IP="$(hostname -I | awk '{print $1}')"
 echo ""
-echo "Stack up. Sample UI: http://$(hostname -I | awk '{print $1}'):8000/ui"
-echo "Health:          http://localhost:8000/health/live"
+echo "Stack up. Sample UI: http://${HOST_IP}:8000/ui"
+echo "pgAdmin:           http://${HOST_IP}:5050  (login admin@local.dev / admin)"
+echo "                   Server 'mooKIT LMS' is pre-configured (postgres/postgres)"
+echo "Health:            http://localhost:8000/health/live"

@@ -87,7 +87,10 @@ class DurableArtifactRegistry(IArtifactRegistry):
 
     async def list(self, ctx: RequestContext, *, type: str | None = None) -> list[Artifact]:
         async with self.session_factory() as session:
-            stmt = select(ArtifactModel).where(ArtifactModel.tenant_key == ctx.tenant_key)
+            stmt = select(ArtifactModel).where(
+                ArtifactModel.tenant_key == ctx.tenant_key,
+                ArtifactModel.user_id == ctx.user_id,
+            )
             if type:
                 stmt = stmt.where(ArtifactModel.type == type)
             result = await session.execute(stmt)

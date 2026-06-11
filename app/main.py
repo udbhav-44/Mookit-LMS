@@ -35,7 +35,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from .api import chat, confirm, files, health, meta, sessions
+from .api import chat, confirm, files, health, meta, quiz, sessions
 from .audit.logger import AuditLogger
 from .config import settings
 from .mookit.client import MooKitClient
@@ -258,6 +258,7 @@ app.include_router(health.router,   prefix="/health",      tags=["health"])
 app.include_router(chat.router,     prefix="/v1",          tags=["chat"])
 app.include_router(sessions.router, prefix="/v1/sessions", tags=["sessions"])
 app.include_router(files.router,    prefix="/v1",          tags=["files"])
+app.include_router(quiz.router,     prefix="/v1",          tags=["quiz"])
 app.include_router(confirm.router,  prefix="/v1",          tags=["confirm"])
 app.include_router(meta.router,     prefix="/v1",          tags=["meta"])
 

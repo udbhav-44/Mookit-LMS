@@ -28,9 +28,14 @@ async def test_publish_lecture_uploads_stored_video(ctx, monkeypatch) -> None:
         }
         await executor.execute(ctx, "publish_lecture", payload)
 
-    assert "create_lecture" in mookit.write_calls
-    assert "upload_file" in mookit.write_calls           # video pushed to mooKIT
-    assert "attach_course_resource" in mookit.write_calls  # attached as resource
+    assert mookit.write_calls == ["create_lecture", "upload_file", "attach_course_resource"]
+    upload_kw = mookit.calls_to("upload_file")[0]
+    attach_kw = mookit.calls_to("attach_course_resource")[0]
+    assert upload_kw["entity_type"] == "lectures"
+    assert attach_kw["entity_type"] == "lectures"
+    assert upload_kw["entity_id"] == attach_kw["entity_id"]
+    assert attach_kw["resources"][0]["resourceType"] == "video"
+    assert attach_kw["resources"][0]["isPrimary"] is True
 
 
 async def test_lecture_tool_emits_upload_id_without_mookit_id(ctx) -> None:

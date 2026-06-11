@@ -6,6 +6,7 @@ The citation is a placeholder; the pipeline overrides it with the server-chosen 
 from __future__ import annotations
 
 from app.gen.quiz.params import QuizParams
+from app.gen.quiz.prompting import GenDirectives
 from app.gen.quiz.rag import Evidence
 from app.gen.quiz.schemas import (
     FIB,
@@ -17,7 +18,9 @@ from app.gen.quiz.schemas import (
     MCQSingle,
     Option,
     QuestionType,
+    SolutionSpec,
     TrueFalse,
+    VarBinding,
     _QuestionBase,
 )
 
@@ -25,9 +28,29 @@ _PLACEHOLDER = Citation(source_id="placeholder", locator={}, quote="placeholder"
 
 
 async def fake_generator(
-    *, qtype: QuestionType, evidence: list[Evidence], params: QuizParams
+    *,
+    qtype: QuestionType,
+    evidence: list[Evidence],
+    params: QuizParams,
+    directives: GenDirectives | None = None,
 ) -> _QuestionBase:
     bloom = params.bloom_level
+    if qtype == "fib" and directives is not None and directives.quantitative:
+        # Quantitative numeric item with a self-consistent, checkable worked solution.
+        return FIB(
+            questionText="A body of mass m=2 under acceleration a=3 experiences what force?",
+            bloom_level=bloom,
+            citation=_PLACEHOLDER,
+            fibUseRange=True,
+            fibRangeLower=6.0,
+            fibRangeUpper=6.0,
+            solution=SolutionSpec(
+                solution_expr="m * a",
+                variables=[VarBinding(name="m", value=2.0), VarBinding(name="a", value=3.0)],
+                answer=6.0,
+                unit="N",
+            ),
+        )
     if qtype == "mcq_single":
         return MCQSingle(
             questionText="Where does photosynthesis occur?",

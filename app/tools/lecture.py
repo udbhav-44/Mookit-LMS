@@ -3,8 +3,9 @@
   * DraftLectureTool (draft)   — resolve week/module + generate title → lecture_draft artifact.
   * PublishLectureTool (publish) — propose publishing with a diff preview. NEVER calls mooKIT.
 
-Video upload is Dev A's file path; we reference the uploaded file_artifact_id and describe the
-attach-as-course-resource step in the payload.
+Local video is stored via POST /v1/files first. On confirm, the executor runs the mooKIT flow:
+POST /lectures → POST /files/add (entityType=lectures) → POST /lectures/{id}/course-resources
+with one primary video resource (triggers Vimeo ingest server-side).
 """
 
 from __future__ import annotations

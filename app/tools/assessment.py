@@ -23,6 +23,7 @@ from app.contracts import (
     Tool,
     ToolResult,
 )
+from app.contracts.errors import ErrorInfo
 from app.core.hashing import canonical_hash
 from app.gen.quiz.params import QuizParams
 from app.gen.quiz.pipeline import QuizPipeline
@@ -55,7 +56,8 @@ def _default_assessment_create(title: str) -> dict[str, Any]:
 
 
 class CreateQuizArgs(BaseModel):
-    doc_artifact_id: str
+    doc_artifact_id: str | None = None
+    doc_artifact_ids: list[str] = []
     title: str
     count: int = 5
     bloom_level: str = "understand"
@@ -64,7 +66,10 @@ class CreateQuizArgs(BaseModel):
 
 class CreateQuizTool(Tool):
     name = "create_quiz"
-    description = "Generate a grounded, cited quiz draft from an uploaded document."
+    description = (
+        "Generate a grounded, cited quiz draft from one or more uploaded documents. "
+        "Pass a single doc_artifact_id OR a list in doc_artifact_ids."
+    )
     risk_tier = "draft"
     parameters_schema = strict_schema(CreateQuizArgs)
     required_permission = ("assessments", "create")
@@ -75,6 +80,18 @@ class CreateQuizTool(Tool):
 
     async def run(self, ctx: RequestContext, args: dict[str, Any]) -> ToolResult:
         parsed = CreateQuizArgs.model_validate(args)
+        doc_ids = parsed.doc_artifact_ids or (
+            [parsed.doc_artifact_id] if parsed.doc_artifact_id else []
+        )
+        if not doc_ids:
+            return ToolResult(
+                ok=False,
+                message="No source document(s) specified.",
+                error=ErrorInfo(
+                    code="missing_doc",
+                    message="Provide doc_artifact_id or doc_artifact_ids.",
+                ),
+            )
         params = QuizParams(
             bloom_level=parsed.bloom_level,  # type: ignore[arg-type]
             difficulty=parsed.difficulty,  # type: ignore[arg-type]
@@ -82,7 +99,7 @@ class CreateQuizTool(Tool):
             type_mix={"mcq_single": parsed.count},
         )
         draft = await self._pipeline.build_draft(
-            ctx, self._registry, doc_artifact_id=parsed.doc_artifact_id, title=parsed.title, params=params
+            ctx, self._registry, doc_artifact_id=doc_ids, title=parsed.title, params=params
         )
         return ToolResult(
             ok=True,
@@ -94,16 +111,25 @@ class CreateQuizTool(Tool):
 
 class EditQuizArgs(BaseModel):
     draft_id: str
-    op: str  # "add" | "remove" | "set_difficulty"
+    # Draft-level: add | remove | set_difficulty.
+    # Per-question: edit_text | regenerate | replace_similar | change_type | flag.
+    op: str
     qtype: str | None = None
     delta: int | None = None
     index: int | None = None
     difficulty: str | None = None
+    questionText: str | None = None  # noqa: N815 — edit_text payload
+    reason: str | None = None  # flag reason
+    instruction: str | None = None  # optional hint to bias regeneration
 
 
 class EditQuizTool(Tool):
     name = "edit_quiz"
-    description = "Edit a quiz draft: add questions, remove a question, or change difficulty."
+    description = (
+        "Edit a quiz draft. Draft-level ops: add, remove, set_difficulty. Per-question ops "
+        "(by index): edit_text (instructor text), regenerate / replace_similar (re-draft one "
+        "question, re-grounded + re-verified), change_type, flag."
+    )
     risk_tier = "draft"
     parameters_schema = strict_schema(EditQuizArgs)
     required_permission = ("assessments", "update")
@@ -115,14 +141,10 @@ class EditQuizTool(Tool):
     async def run(self, ctx: RequestContext, args: dict[str, Any]) -> ToolResult:
         parsed = EditQuizArgs.model_validate(args)
         op: dict[str, Any] = {"op": parsed.op}
-        if parsed.qtype is not None:
-            op["qtype"] = parsed.qtype
-        if parsed.delta is not None:
-            op["delta"] = parsed.delta
-        if parsed.index is not None:
-            op["index"] = parsed.index
-        if parsed.difficulty is not None:
-            op["difficulty"] = parsed.difficulty
+        for field in ("qtype", "delta", "index", "difficulty", "questionText", "reason", "instruction"):
+            value = getattr(parsed, field)
+            if value is not None:
+                op[field] = value
         updated = await self._pipeline.apply_edit(ctx, self._registry, parsed.draft_id, op)
         return ToolResult(
             ok=True,

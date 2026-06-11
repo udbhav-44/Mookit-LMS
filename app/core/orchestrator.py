@@ -92,6 +92,12 @@ class Orchestrator:
             keep_recent=self._settings.memory.transcript_keep_recent,
         )
 
+    @property
+    def registry(self) -> ToolRegistry:
+        """The tool registry — lets non-chat endpoints (e.g. the deterministic quiz-edit route)
+        dispatch the same tools the chat loop uses."""
+        return self._registry
+
     # ------------------------------------------------------------------
     # SSE adapter consumed by app/api/chat.py
     # ------------------------------------------------------------------
@@ -222,7 +228,23 @@ class Orchestrator:
                 proposed=False,
             )
 
-        result = await tool.run(ctx, arguments)
+        try:
+            result = await tool.run(ctx, arguments)
+        except Exception as exc:
+            return _Dispatch(
+                events=[
+                    OrchestratorEvent(
+                        event="error",
+                        data={
+                            "code": "tool_error",
+                            "message": str(exc),
+                            "retryable": True,
+                        },
+                    )
+                ],
+                function_output=_fn_output(call_id, {"ok": False, "error": str(exc)}),
+                proposed=False,
+            )
 
         if isinstance(result, ProposedAction):
             # Publish tier: NEVER execute. Persist via the gate seam, surface for confirmation.

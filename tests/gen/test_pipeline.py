@@ -51,6 +51,22 @@ async def test_descriptive_gets_rubric(ctx: RequestContext) -> None:
     assert sum(c["points"] for c in desc["rubric"]["criteria"]) == desc["score"]
 
 
+async def test_multi_doc_draft_cites_each_source(ctx: RequestContext) -> None:
+    reg = InMemoryArtifactRegistry()
+    params = QuizParams(count=4, type_mix={"mcq_single": 4})
+    draft = await _pipeline().build_draft(
+        ctx,
+        reg,
+        doc_artifact_id=["doc-a", "doc-b"],
+        title="Combined Quiz",
+        params=params,
+    )
+    assert draft.payload["source_artifact_ids"] == ["doc-a", "doc-b"]
+    source_ids = {q["citation"]["source_id"] for q in draft.payload["questions"]}
+    assert source_ids <= {"doc-a", "doc-b"}
+    assert len(source_ids) == 2
+
+
 async def test_provenance_stamped(ctx: RequestContext) -> None:
     reg = InMemoryArtifactRegistry()
     draft = await _pipeline().build_draft(

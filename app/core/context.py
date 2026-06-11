@@ -48,7 +48,12 @@ async def get_request_context(request: Request) -> RequestContext:
         body = {}
 
     instance_id: str = body.get("instanceId") or request.headers.get("x-instance-id", "default")
-    session_id: str = body.get("sessionId") or str(uuid.uuid4())
+    session_id: str = (
+        body.get("sessionId")
+        or request.headers.get("x-session-id")
+        or request.headers.get("session")
+        or str(uuid.uuid4())
+    )
     tenant_key = f"{instance_id}:{course}"
     request_id = str(uuid.uuid4())
 

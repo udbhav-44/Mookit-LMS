@@ -53,6 +53,10 @@ dependencies = [
     "python-pptx>=0.6",
     "openpyxl>=3.1",
 
+    # PDF → page-image rendering for vision comprehension (permissively licensed, no system deps)
+    "pypdfium2>=4.0",
+    "pillow>=10.0",
+
     # File type validation
     "python-magic>=0.4.27",
 ]

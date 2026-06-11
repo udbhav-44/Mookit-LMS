@@ -23,6 +23,7 @@ from ..mookit.client import MooKitClient
 from ..mookit.schemas import (
     AnnouncementCreate,
     AssessmentCreate,
+    CourseResourceCreate,
     LectureCreate,
     QuestionCreate,
     SectionCreate,
@@ -125,7 +126,10 @@ class DeterministicExecutor:
         return matched or None
 
     # ------------------------------------------------------------------
-    # Lecture: create → attach video resource (if any)
+    # Lecture (mooKIT video flow):
+    #   1. POST /lectures
+    #   2. POST /files/add  (entityType=lectures, entityId=<lecture id>)
+    #   3. POST /lectures/{id}/course-resources  (one primary video resource)
     # ------------------------------------------------------------------
     async def _publish_lecture(self, ctx: RequestContext, payload: dict) -> Any:
         body_fields = {
@@ -137,27 +141,47 @@ class DeterministicExecutor:
         if lecture_id is None:
             return lecture
 
-        # Resolve the video resource: either a ready mooKIT fileId (_resource) or a stored upload
-        # (_upload_file_id) that we first push to mooKIT's /files/add to obtain a fileId.
-        resource = payload.get("_resource")
+        resource = self._coerce_resource(payload.get("_resource"))
         if resource is None and payload.get("_upload_file_id"):
-            resource = await self._upload_stored_to_mookit(ctx, str(payload["_upload_file_id"]))
+            resource = await self._upload_stored_to_mookit(
+                ctx, str(payload["_upload_file_id"]), lecture_id=int(lecture_id)
+            )
         if resource:
-            await self.mookit.attach_course_resource(ctx, "lectures", int(lecture_id), [resource])
+            await self.mookit.attach_course_resource(
+                ctx, "lectures", int(lecture_id), [resource.model_dump()]
+            )
         return lecture
 
-    async def _upload_stored_to_mookit(self, ctx: RequestContext, our_file_id: str) -> dict | None:
-        """Push a locally-stored uploaded file to mooKIT (/files/add) and return a video resource."""
+    @staticmethod
+    def _coerce_resource(raw: dict | None) -> CourseResourceCreate | None:
+        if not raw:
+            return None
+        return CourseResourceCreate(
+            resourceType=raw.get("resourceType", "video"),
+            resourceFileId=int(raw["resourceFileId"]),
+            isPrimary=bool(raw.get("isPrimary", True)),
+        )
+
+    async def _upload_stored_to_mookit(
+        self, ctx: RequestContext, our_file_id: str, *, lecture_id: int
+    ) -> CourseResourceCreate | None:
+        """Step 2: push our stored video to mooKIT /files/add scoped to the new lecture."""
         meta = await self._lookup_file_meta(ctx, our_file_id)
         if meta is None:
             return None
         path, filename, mime = meta
         with open(path, "rb") as f:
             files = {"files": (filename, f, mime)}
-            managed = await self.mookit.upload_file(ctx, files)
+            managed = await self.mookit.upload_file(
+                ctx, files, entity_type="lectures", entity_id=lecture_id
+            )
         if not managed:
             return None
-        return {"resourceType": "video", "resourceFileId": managed[0].id, "isPrimary": True}
+        return CourseResourceCreate(
+            resourceType="video",
+            resourceFileId=managed[0].id,
+            isPrimary=True,
+        )
 
     async def _lookup_file_meta(self, ctx: RequestContext, our_file_id: str):
         if self.session_factory is None:

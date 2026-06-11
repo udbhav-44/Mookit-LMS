@@ -28,7 +28,7 @@ from ..auth.permissions import require_permission
 from ..config import settings
 from ..contracts.context import RequestContext
 from ..core.context import get_request_context
-from ..store.db import FileMeta
+from ..store.db import DocChunk, FileMeta
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,9 @@ _EXTENSION_TO_MARKER = {
     ".xlsx": _XLSX_MARKER,
 }
 
-_ALLOWED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx", ".csv", ".txt"}
+_DOCUMENT_EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx", ".csv", ".txt"}
+_VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm", ".mkv", ".m4v"}
+_ALLOWED_EXTENSIONS = _DOCUMENT_EXTENSIONS | _VIDEO_EXTENSIONS
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +100,10 @@ async def upload_file(
     storage_path = upload_dir / f"{file_id}{suffix}"
     storage_path.write_bytes(content)
 
+    is_video = suffix in _VIDEO_EXTENSIONS
+    initial_status = "stored" if is_video else "pending"
+    file_kind = "video" if is_video else "document"
+
     # 7. Write FileMeta to Postgres.
     async with request.app.state.session_factory() as session:
         stmt = insert(FileMeta).values(
@@ -107,16 +113,16 @@ async def upload_file(
             filesize=len(content),
             mime_type=_suffix_to_mime(suffix),
             storage_path=str(storage_path),
-            extraction_status="pending",
+            extraction_status=initial_status,
             user_id=ctx.user_id,
         )
         await session.execute(stmt)
         await session.commit()
 
-    # 8. Dispatch ARQ background job for extraction + RAG indexing.
+    # 8. Documents: dispatch ARQ job for text extraction + RAG indexing. Videos: stored only.
     job_id: str | None = None
     arq_pool = getattr(request.app.state, "arq_pool", None)
-    if arq_pool:
+    if not is_video and arq_pool:
         job = await arq_pool.enqueue_job(
             "extract_and_index_file",
             tenant_key=ctx.tenant_key,
@@ -136,8 +142,7 @@ async def upload_file(
             )
             await session.commit()
 
-    # Register an uploaded_file artifact so the orchestrator's manifest (Dev B) can reference it,
-    # enabling "create a quiz from this document". The RAG chunks are keyed by file_id == doc id.
+    # Register an uploaded_file artifact so the orchestrator's manifest (Dev B) can reference it.
     registry = getattr(request.app.state, "artifact_registry", None)
     if registry is not None:
         from app.contracts import Artifact
@@ -145,7 +150,11 @@ async def upload_file(
             await registry.add(ctx, Artifact(
                 id=file_id, type="uploaded_file", title=original_name, status="uploaded",
                 provenance={"created_by": ctx.user_id, "ai_generated": False},
-                payload={"filename": original_name, "mime_type": _suffix_to_mime(suffix)},
+                payload={
+                    "filename": original_name,
+                    "mime_type": _suffix_to_mime(suffix),
+                    "kind": file_kind,
+                },
                 namespaced_id=f"{ctx.tenant_key}:{ctx.user_id}:{file_id}",
             ))
         except Exception as exc:
@@ -160,6 +169,9 @@ async def upload_file(
     return {
         "fileId": file_id,
         "jobId": job_id,
+        "fileKind": file_kind,
+        "extractionStatus": initial_status,
+        "ready": is_video,
         "artifact": {
             "id": file_id,
             "type": "uploaded_file",
@@ -198,17 +210,40 @@ async def file_status(
             import json
             progress = json.loads(raw)
 
+    chunk_count: int | None = None
+    if meta.extraction_status == "indexed":
+        from sqlalchemy import func, select as sa_select
+        async with request.app.state.session_factory() as session:
+            chunk_count = (
+                await session.execute(
+                    sa_select(func.count())
+                    .select_from(DocChunk)
+                    .where(
+                        DocChunk.tenant_key == ctx.tenant_key,
+                        DocChunk.doc_id == file_id,
+                    )
+                )
+            ).scalar_one()
+
     return {
         "fileId": file_id,
         "filename": meta.filename,
+        "filesize": meta.filesize,
         "extractionStatus": meta.extraction_status,
+        "chunkCount": chunk_count,
         "progress": progress,
+        "fileKind": "video" if _is_video_filename(meta.filename) else "document",
+        "ready": meta.extraction_status in ("indexed", "stored"),
     }
 
 
 # ---------------------------------------------------------------------------
 # Validation helpers
 # ---------------------------------------------------------------------------
+
+def _is_video_filename(filename: str) -> bool:
+    return Path(filename).suffix.lower() in _VIDEO_EXTENSIONS
+
 
 def _validate_magic_bytes(content: bytes, suffix: str) -> None:
     if suffix == ".pdf":
@@ -220,7 +255,19 @@ def _validate_magic_bytes(content: bytes, suffix: str) -> None:
                 status_code=400,
                 detail=f"File content is not a valid {suffix.lstrip('.')} (missing ZIP magic bytes).",
             )
+    elif suffix in _VIDEO_EXTENSIONS:
+        _validate_video_magic(content, suffix)
     # CSV and TXT have no reliable magic bytes; accept them.
+
+
+def _validate_video_magic(content: bytes, suffix: str) -> None:
+    if len(content) < 12:
+        raise HTTPException(status_code=400, detail="File is too small to be a valid video.")
+    if suffix in (".webm", ".mkv"):
+        if not content.startswith(b"\x1a\x45\xdf\xa3"):
+            raise HTTPException(status_code=400, detail="File is not a valid WebM/Matroska video.")
+    elif content[4:8] != b"ftyp":
+        raise HTTPException(status_code=400, detail="File is not a valid MP4/MOV video (missing ftyp box).")
 
 
 def _validate_ooxml(content: bytes, suffix: str) -> None:
@@ -270,4 +317,9 @@ def _suffix_to_mime(suffix: str) -> str:
         ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         ".csv":  "text/csv",
         ".txt":  "text/plain",
+        ".mp4":  "video/mp4",
+        ".m4v":  "video/mp4",
+        ".mov":  "video/quicktime",
+        ".webm": "video/webm",
+        ".mkv":  "video/x-matroska",
     }.get(suffix, "application/octet-stream")

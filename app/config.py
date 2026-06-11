@@ -23,7 +23,11 @@ class OpenAIConfig(BaseModel):
     model: str = "gpt-4o"
     fast_model: str = "gpt-4o-mini"          # cheaper model for routing/extraction
     quiz_temperature: float = 0.9            # diversity for generation
+    comprehend_temperature: float = 0.2      # blueprint comprehension: low, near-deterministic
+    verify_temperature: float = 0.0          # solve-verify: deterministic
     deterministic_temperature: float = 0.0   # evals / snapshots
+    blueprint_model: str = "gpt-4o"          # long-context model for comprehension
+    context_token_budget: int = 100_000      # source-router threshold; raise for long-context models
     embed_model: str = "text-embedding-3-small"
     embed_dim: int = 1536
 
@@ -69,7 +73,7 @@ class SecurityConfig(BaseModel):
 
 
 class LimitsConfig(BaseModel):
-    max_file_size_bytes: int = 10 * 1024 * 1024   # 10 MB
+    max_file_size_bytes: int = 500 * 1024 * 1024   # 500 MB default; override via LIMITS__MAX_FILE_SIZE_BYTES
     max_file_pages: int = 200
     max_messages_per_session: int = 100
     max_context_tokens: int = 8000
@@ -78,6 +82,7 @@ class LimitsConfig(BaseModel):
     upload_dir: str = "/tmp/mookit_uploads"
     max_zip_expansion_ratio: int = 100           # zip-bomb guard
     max_zip_uncompressed_bytes: int = 50 * 1024 * 1024  # 50 MB uncompressed cap
+    vision_max_pages: int = 15                   # page-image cap per doc for vision comprehension
 
 
 class MemoryConfig(BaseModel):
@@ -97,6 +102,14 @@ class Settings(BaseSettings):
     app_name: str = "mooKIT AI Assistant"
     debug: bool = False
     rag_backend: str = "pgvector"  # "pgvector" (embeddings) | "keyword" (Redis term-overlap fallback)
+    # Blueprint-first quiz pipeline (comprehend → plan → multi-span generate → verify). When False,
+    # the legacy one-span-per-question path is used. See app/gen/quiz/pipeline.py.
+    quiz_blueprint_enabled: bool = False
+    # Vision comprehension: read PDF page images so equations/figures survive (needs blueprint enabled).
+    quiz_vision_enabled: bool = False
+    # Independent LLM solve-critique: re-derive each answer from evidence and flag disagreements
+    # (one extra LLM call per question; needs blueprint enabled). See app/gen/quiz/solve_verify.py.
+    quiz_solve_verify_enabled: bool = True
     # Create tables on startup (convenient for dev/out-of-box). Set False in prod and run
     # `alembic upgrade head` instead.
     auto_create_tables: bool = True

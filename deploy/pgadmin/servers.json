@@ -1,0 +1,15 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "mooKIT LMS (pgvector)",
+      "Group": "Development",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "mookit_lms",
+      "Username": "postgres",
+      "Password": "postgres",
+      "SSLMode": "prefer",
+      "Comment": "Artifacts, file_meta, doc_chunks (1536-dim embeddings)"
+    }
+  }
+}

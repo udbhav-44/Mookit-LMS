@@ -15,7 +15,7 @@ from app.contracts import LLMProvider
 from app.core.prompts.system import SYSTEM_PROMPT
 from app.gen.quiz.gen_schemas import GEN_SCHEMA_BY_TYPE, to_full
 from app.gen.quiz.params import QuizParams
-from app.gen.quiz.prompting import build_quiz_prompt
+from app.gen.quiz.prompting import GenDirectives, build_quiz_prompt
 from app.gen.quiz.rag import Evidence
 from app.gen.quiz.schemas import QuestionType, _QuestionBase
 
@@ -26,7 +26,12 @@ class OpenAIQuestionGenerator:
         self._temperature = temperature
 
     async def __call__(
-        self, *, qtype: QuestionType, evidence: list[Evidence], params: QuizParams
+        self,
+        *,
+        qtype: QuestionType,
+        evidence: list[Evidence],
+        params: QuizParams,
+        directives: GenDirectives | None = None,
     ) -> _QuestionBase:
         # Generate CONTENT only (no citation): grounding is attached server-side by the pipeline.
         gen_schema = GEN_SCHEMA_BY_TYPE[qtype]
@@ -36,6 +41,7 @@ class OpenAIQuestionGenerator:
             qtype=qtype,
             params=params,
             delimiter=secrets.token_hex(4),  # randomized spotlight delimiter per call
+            directives=directives,
         )
         gen = await self._provider.respond_structured(
             instructions=SYSTEM_PROMPT,

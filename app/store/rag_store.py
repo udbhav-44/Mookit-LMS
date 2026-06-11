@@ -132,17 +132,34 @@ class RAGStore:
         chunks = [json.loads(r) for r in raw]
         query_words = set(re.findall(r"\w+", query.lower()))
 
+        if not query_words:
+            chunks.sort(key=lambda c: c.get("chunk_index", 0))
+            return chunks[:k]
+
         scored: list[tuple[float, dict[str, Any]]] = []
         for chunk in chunks:
             text_words = set(re.findall(r"\w+", chunk["text"].lower()))
-            if query_words:
-                score = len(query_words & text_words) / len(query_words)
-            else:
-                score = 0.0
+            score = len(query_words & text_words) / len(query_words)
             scored.append((score, chunk))
 
         scored.sort(key=lambda x: -x[0])
         return [c for _, c in scored[:k]]
+
+    async def fetch_all_chunks(
+        self, ctx: RequestContext, doc_artifact_id: str
+    ) -> list[dict[str, Any]]:
+        """Return ALL chunks for a document in ``chunk_index`` order (full-text reconstruction).
+
+        Used by full-context comprehension, which needs the whole document, not the top-k. Tenant-
+        scoped like ``retrieve``; an unknown doc yields an empty list.
+        """
+        key = self._chunks_key(ctx.tenant_key, doc_artifact_id)
+        raw = await self.redis.lrange(key, 0, -1)  # type: ignore[misc]
+        if not raw:
+            return []
+        chunks = [json.loads(r) for r in raw]
+        chunks.sort(key=lambda c: c.get("chunk_index", 0))
+        return chunks
 
     async def list_documents(self, ctx: RequestContext) -> list[str]:
         """List all document IDs indexed under this tenant."""

@@ -66,7 +66,40 @@ class PgVectorRAGStore:
     async def retrieve(
         self, ctx: RequestContext, doc_artifact_id: str, query: str, k: int = 5
     ) -> list[dict[str, Any]]:
-        qvec = await self.embedder.embed_one(query or "")
+        async with self.session_factory() as session:
+            base = select(DocChunk).where(
+                DocChunk.tenant_key == ctx.tenant_key,
+                DocChunk.doc_id == doc_artifact_id,
+            )
+            # OpenAI embeddings reject empty strings; with no topics use document order.
+            if not (query or "").strip():
+                rows = (
+                    await session.execute(base.order_by(DocChunk.chunk_index).limit(k))
+                ).scalars().all()
+            else:
+                qvec = await self.embedder.embed_one(query.strip())
+                rows = (
+                    await session.execute(
+                        base.order_by(DocChunk.embedding.cosine_distance(qvec)).limit(k)
+                    )
+                ).scalars().all()
+        return [
+            {
+                "chunk_index": r.chunk_index,
+                "text": r.text,
+                "span": r.span,
+                "locator": r.locator,
+            }
+            for r in rows
+        ]
+
+    async def fetch_all_chunks(
+        self, ctx: RequestContext, doc_artifact_id: str
+    ) -> list[dict[str, Any]]:
+        """Return ALL chunks for a document in ``chunk_index`` order (full-text reconstruction).
+
+        Used by full-context comprehension; tenant-scoped, no k limit. Parity with the keyword store.
+        """
         async with self.session_factory() as session:
             rows = (
                 await session.execute(
@@ -75,17 +108,11 @@ class PgVectorRAGStore:
                         DocChunk.tenant_key == ctx.tenant_key,
                         DocChunk.doc_id == doc_artifact_id,
                     )
-                    .order_by(DocChunk.embedding.cosine_distance(qvec))
-                    .limit(k)
+                    .order_by(DocChunk.chunk_index)
                 )
             ).scalars().all()
         return [
-            {
-                "chunk_index": r.chunk_index,
-                "text": r.text,
-                "span": r.span,
-                "locator": r.locator,
-            }
+            {"chunk_index": r.chunk_index, "text": r.text, "span": r.span, "locator": r.locator}
             for r in rows
         ]
 

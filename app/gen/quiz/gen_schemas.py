@@ -24,6 +24,7 @@ from app.gen.quiz.schemas import (
     MCQSingle,
     Option,
     QuestionType,
+    SolutionSpec,
     TrueFalse,
     _QuestionBase,
 )
@@ -55,6 +56,8 @@ class GenFIB(BaseModel):
     fibUseRange: bool = False  # noqa: N815
     fibRangeLower: float | None = None  # noqa: N815
     fibRangeUpper: float | None = None  # noqa: N815
+    # Quantitative items return a checkable worked solution; the server recomputes & verifies it.
+    solution: SolutionSpec | None = None
 
 
 class GenDescriptive(BaseModel):

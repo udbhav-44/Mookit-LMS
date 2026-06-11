@@ -46,8 +46,12 @@ class ReferenceResolver:
         focus = await self._registry.focus(ctx)
         artifacts = {a.id: a for a in await self._registry.list(ctx)}
         ordered = [artifacts[i] for i in focus if i in artifacts]
-        # Include any not-yet-focused artifacts at the end.
-        ordered += [a for a in artifacts.values() if a.id not in set(focus)]
+        focused_ids = set(focus)
+        # Include non-focused drafts; omit stale uploads so "this document" means the latest upload.
+        ordered += [
+            a for a in artifacts.values()
+            if a.id not in focused_ids and a.type != "uploaded_file"
+        ]
         if not ordered:
             return "(no artifacts yet)"
         lines = [

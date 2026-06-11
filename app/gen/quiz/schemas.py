@@ -42,7 +42,10 @@ class _QuestionBase(BaseModel):
     bloom_level: BloomLevel = "understand"
     score: float = 1.0
     negativeScore: float = 0.0  # noqa: N815
-    citation: Citation
+    citation: Citation  # primary grounding span (kept for backward compatibility)
+    # All grounding spans backing this question — >1 for cross-concept / cross-document synthesis
+    # items. ``citation`` remains the primary; ``citations`` is empty for legacy single-span items.
+    citations: list[Citation] = Field(default_factory=list)
     flags: list[str] = Field(default_factory=list)
 
     @property
@@ -125,6 +128,25 @@ class Blank(BaseModel):
     answers: list[BlankAnswer]
 
 
+class VarBinding(BaseModel):
+    """A named input value used in a quantitative item's solution, grounded in the source."""
+
+    name: str
+    value: float
+
+
+class SolutionSpec(BaseModel):
+    """A checkable worked solution for a quantitative item (verification metadata, not graded).
+
+    The pipeline recomputes ``solution_expr`` from ``variables`` and confirms it equals ``answer`` —
+    catching the common failure where the method is right but the stated number is wrong."""
+
+    solution_expr: str  # e.g. "m * a" — evaluated by app.gen.quiz.numeric.safe_eval
+    variables: list[VarBinding] = Field(default_factory=list)
+    answer: float  # the numeric answer the expression should yield
+    unit: str | None = None
+
+
 class FIB(_QuestionBase):
     questionType: Literal["fib"] = "fib"  # noqa: N815
     # Exactly one of (discrete blanks) or (numeric range) must be provided.
@@ -132,6 +154,8 @@ class FIB(_QuestionBase):
     fibUseRange: bool = False  # noqa: N815
     fibRangeLower: float | None = None  # noqa: N815
     fibRangeUpper: float | None = None  # noqa: N815
+    # Optional checkable worked solution for quantitative items (verified server-side, not sent to mooKIT).
+    solution: SolutionSpec | None = None
 
     @model_validator(mode="after")
     def _discrete_xor_range(self) -> FIB:

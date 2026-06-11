@@ -119,10 +119,14 @@ optional `modeOfTeaching` (`oldRecording`|`newRecording`|`liveSession`|null), `r
 > **Weeks/Modules/Topics are taxonomy term IDs, not resource containers.** Resolve "Week 4" via
 > `GET /taxonomies/{type}` → use the term `id` as `weekId`/`topicId`.
 
-**Video attach flow:** `POST /files/add` → get `fileId` → `POST /lectures` → `POST /lectures/{id}/course-resources`
-with `{resourceType:"video", resourceFileId:fileId, isPrimary:true}` → schedule via `releaseOn`/`published`.
-(`resourceType` ∈ file|audio|video; only one `isPrimary` per entity; primary resources can't be deleted.)
-**Confirm with mooKIT team** whether the intended video path is uploaded file vs Vimeo id vs external URL.
+**Video lecture flow (confirmed):**
+1. `POST /lectures` — create the lecture shell (`title`, `weekId`, `topicId`, `published`, optional `releaseOn`).
+2. `POST /files/add` — upload the video (`multipart` field `files`; query `entityType=lectures`, `entityId=<lecture id>`).
+   Returns `ManagedFile[]`; use `id` as `resourceFileId`. mooKIT/Vimeo ingestion happens server-side after attach.
+3. `POST /lectures/{lectureId}/course-resources` — body `{"resources":[{"resourceType":"video","resourceFileId":<fileId>,"isPrimary":true}]}`.
+   Exactly one resource must be `isPrimary: true`.
+
+Schedule via `releaseOn` + `published: 0` on the lecture create body. (`resourceType` ∈ file|audio|video.)
 
 ---
 

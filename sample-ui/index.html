@@ -58,6 +58,24 @@
   .actions { display:flex; gap:10px; justify-content:flex-end; margin-top:16px; }
   .quick-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; align-self:flex-start; }
   .quick-actions button { font-size:13px; padding:8px 14px; }
+  .quiz-q { margin:10px 0; padding:12px; background:var(--panel); border:1px solid var(--border); border-radius:8px; }
+  .quiz-q .q-num { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  .quiz-q .q-stem { font-weight:500; margin:6px 0 10px; line-height:1.45; }
+  .quiz-q .q-opt { padding:3px 0; font-size:13px; color:var(--muted); }
+  .quiz-q .q-opt.correct { color:var(--accent2); font-weight:600; }
+  .quiz-q .q-meta { font-size:11px; color:var(--muted); margin-top:8px; }
+  .quiz-q .q-cite { font-size:11px; color:var(--muted); margin-top:6px; padding:8px; background:var(--panel2);
+    border-radius:6px; border-left:3px solid var(--accent); }
+  .draft-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; padding-top:12px;
+    border-top:1px solid var(--border); }
+  .draft-actions button { font-size:13px; padding:8px 14px; }
+  .q-edit-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; padding-top:8px;
+    border-top:1px dashed var(--border); align-items:center; }
+  .q-edit-actions button, .q-edit-actions select { font-size:11px; padding:4px 8px; border-radius:6px;
+    background:var(--panel2); color:var(--txt); border:1px solid var(--border); cursor:pointer; }
+  .q-edit-actions button:hover { border-color:var(--accent); }
+  .q-edit-actions button.q-danger { color:var(--danger); }
+  .q-edit-actions .q-spacer { flex:1; }
 </style>
 </head>
 <body>
@@ -74,12 +92,13 @@
 <main>
   <div id="log"></div>
   <div class="files">
-    <input type="file" id="file" />
+    <input type="file" id="file" multiple accept=".pdf,.docx,.pptx,.xlsx,.csv,.txt,.mp4,.mov,.webm,.mkv,.m4v" />
     <button class="secondary" id="upload">Upload</button>
     <span id="file-status"></span>
   </div>
   <form id="chat">
     <input id="input" placeholder="e.g. Create a quiz from this PDF · Cancel today's class · Publish this under Week 4" autocomplete="off" />
+    <button type="button" class="secondary danger" id="cancel" style="display:none">Cancel</button>
     <button id="send" type="submit">Send</button>
   </form>
 </main>
@@ -90,12 +109,19 @@
 const $ = (id) => document.getElementById(id);
 const log = $("log");
 let sessionId = "sess-" + Math.random().toString(36).slice(2);
+let uploadedFiles = [];  // { id, name, ready, kind: 'video'|'document', chunks? }
+let chatAbort = null;
+
+function isVideoName(name) {
+  return /\.(mp4|mov|webm|mkv|m4v)$/i.test(name || "");
+}
 
 function headers(extra={}) {
   return Object.assign({
     "course": $("cfg-course").value.trim(),
     "uid": $("cfg-uid").value.trim(),
     "token": $("cfg-token").value.trim(),
+    "x-session-id": sessionId,
   }, extra);
 }
 function baseUrl() { return $("cfg-base").value.trim().replace(/\/$/, ""); }
@@ -136,20 +162,132 @@ function addQuickActions(buttons) {
   scrollLog();
 }
 
-// ---- File upload -------------------------------------------------------
-$("upload").onclick = async () => {
-  const f = $("file").files[0];
-  if (!f) { $("file-status").textContent = "choose a file first"; return; }
-  $("file-status").textContent = "uploading…";
+// ---- File upload + indexing status -------------------------------------
+function registerReadyFile(entry) {
+  if (!uploadedFiles.some((f) => f.id === entry.id)) uploadedFiles.push(entry);
+  else uploadedFiles = uploadedFiles.map((f) => (f.id === entry.id ? entry : f));
+  updateFilesPanel();
+  offerFileActions();
+}
+
+function offerQuizActions(readyDocs) {
+  if (!readyDocs.length) return;
+  if (readyDocs.length === 1) {
+    const f = readyDocs[0];
+    addQuickActions([
+      { label: "Create quiz from " + f.name, message: `Create a quiz from file ${f.id} (${f.name})` },
+    ]);
+    return;
+  }
+  const ids = readyDocs.map((f) => f.id).join(", ");
+  const names = readyDocs.map((f) => f.name).join(", ");
+  addQuickActions([
+    {
+      label: "Create quiz from all " + readyDocs.length + " files",
+      message: `Create a quiz from these files: ${ids} (${names})`,
+    },
+    ...readyDocs.map((f) => ({
+      label: "Quiz from " + f.name + " only",
+      message: `Create a quiz from file ${f.id} (${f.name})`,
+      secondary: true,
+    })),
+  ]);
+}
+
+function offerLectureActions(readyVideos) {
+  for (const v of readyVideos) {
+    addQuickActions([
+      {
+        label: "Publish " + v.name + " under Week 4",
+        message: `Publish this video lecture under Week 4 — file ${v.id} (${v.name})`,
+      },
+      {
+        label: "Publish under Week 5",
+        message: `Publish this video under Week 5 — file ${v.id} (${v.name})`,
+        secondary: true,
+      },
+    ]);
+  }
+}
+
+function offerFileActions() {
+  const ready = uploadedFiles.filter((f) => f.ready);
+  const readyDocs = ready.filter((f) => f.kind === "document");
+  const readyVideos = ready.filter((f) => f.kind === "video");
+  if (readyVideos.length) offerLectureActions(readyVideos);
+  if (readyDocs.length) offerQuizActions(readyDocs);
+}
+
+function updateFilesPanel() {
+  const ready = uploadedFiles.filter((f) => f.ready);
+  if (!ready.length) {
+    $("file-status").textContent = "no files ready yet";
+    return;
+  }
+  $("file-status").textContent =
+    ready.length + " file(s) ready: " +
+    ready.map((f) => f.name + (f.kind === "video" ? " (video)" : "")).join(", ");
+}
+
+async function pollFileStatus(fileId, name, kind) {
+  if (kind === "video") return;  // videos are ready immediately after upload
+  const maxAttempts = 120;
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    try {
+      const r = await fetch(baseUrl() + "/v1/files/" + fileId + "/status", { headers: headers() });
+      const st = await r.json();
+      const data = st.data || st;
+      const status = data.extractionStatus || "unknown";
+      const pct = data.progress?.pct;
+      const msg = data.progress?.message;
+      if (status === "indexed" || data.ready) {
+        const n = data.chunkCount ?? "?";
+        registerReadyFile({ id: fileId, name, ready: true, kind: "document", chunks: n });
+        addChip("✅ " + name + " indexed — " + n + " text chunks ready", "artifact");
+        return;
+      }
+      if (status === "failed") {
+        $("file-status").textContent = name + " · indexing failed";
+        addChip("❌ indexing failed for " + name + (msg ? ": " + msg : ""), "err");
+        return;
+      }
+      $("file-status").textContent = name + " · " + status + (pct != null ? " " + pct + "%" : "") + (msg ? " — " + msg : "");
+    } catch (e) {
+      $("file-status").textContent = name + " · status check failed";
+      return;
+    }
+  }
+  $("file-status").textContent = name + " · still indexing (poll timed out)";
+}
+
+async function uploadOneFile(f) {
+  const kind = isVideoName(f.name) ? "video" : "document";
   const fd = new FormData();
   fd.append("file", f);
+  const r = await fetch(baseUrl() + "/v1/files", { method:"POST", headers: headers(), body: fd });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.detail || r.statusText);
+  const art = j.data || j;
+  const fileId = art.fileId || art.artifact?.id;
+  const fileKind = art.fileKind || kind;
+  if (fileKind === "video" || art.ready) {
+    registerReadyFile({ id: fileId, name: f.name, ready: true, kind: "video" });
+    addChip("🎬 video stored: " + f.name + " (id " + fileId + ") — ready to publish as lecture", "artifact");
+  } else {
+    addChip("📎 uploaded " + f.name + " (id " + fileId + ") — waiting for text extraction…", "artifact");
+    pollFileStatus(fileId, f.name, "document");
+  }
+}
+
+$("upload").onclick = async () => {
+  const files = [...($("file").files || [])];
+  if (!files.length) { $("file-status").textContent = "choose one or more files first"; return; }
+  $("file-status").textContent = "uploading " + files.length + " file(s)…";
   try {
-    const r = await fetch(baseUrl() + "/v1/files", { method:"POST", headers: headers(), body: fd });
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.detail || r.statusText);
-    const art = j.data || j;
-    $("file-status").textContent = "uploaded: " + (art.fileId || art.artifact_id || JSON.stringify(art).slice(0,60));
-    addChip("📎 uploaded " + f.name + " — now ask: \"create a quiz from this document\"", "artifact");
+    for (const f of files) await uploadOneFile(f);
+    $("file-status").textContent = files.length + " file(s) uploading — wait for indexing…";
+    $("file").value = "";
   } catch (e) { $("file-status").textContent = "upload failed: " + e.message; }
 };
 
@@ -169,9 +307,15 @@ function showConfirm(d) {
   }
   if (p.warnings && p.warnings.length)
     html += "<ul class='warn'>" + p.warnings.map(w=>`<li>⚠ ${escapeHtml(w)}</li>`).join("") + "</ul>";
+  if (d.action === "publish_assessment")
+    html += `<p style="color:var(--muted);font-size:13px;margin:12px 0 0">This creates the quiz on mooKIT with the questions from your draft above. Review them before confirming.</p>`;
+  if (d.action === "publish_lecture")
+    html += `<p style="color:var(--muted);font-size:13px;margin:12px 0 0">This uploads the video to mooKIT (if needed), creates the lecture, and attaches the video. Review the week/title above before confirming.</p>`;
+  const confirmLabel = d.action === "publish_assessment" ? "Publish quiz"
+    : d.action === "publish_lecture" ? "Publish lecture" : "Confirm";
   html += `<div class="actions">
       <button class="secondary" id="btn-reject">Cancel</button>
-      <button id="btn-confirm">Confirm</button></div>`;
+      <button id="btn-confirm">${confirmLabel}</button></div>`;
   m.innerHTML = html;
   $("overlay").classList.add("show");
   $("btn-reject").onclick = () => resolveAction(d, false);
@@ -192,6 +336,13 @@ async function resolveAction(d, confirm) {
     const payload = j.data || j;
     if (confirm && d.action === "send_announcement" && payload && payload.title) {
       addChip(`✅ Announcement sent (id ${payload.id}): "${payload.title}"`, "artifact");
+    } else if (confirm && d.action === "publish_assessment") {
+      const title = (payload && payload.title) || (d.preview && d.preview.title) || "quiz";
+      addChip(`✅ Quiz published to mooKIT: "${title}"`, "artifact");
+    } else if (confirm && d.action === "publish_lecture") {
+      const title = (payload && payload.title) || (d.preview && d.preview.title) || "lecture";
+      const lid = payload && (payload.id ?? payload.lectureId);
+      addChip(`✅ Lecture published to mooKIT${lid ? " (id " + lid + ")" : ""}: "${title}"`, "artifact");
     } else {
       addChip(confirm ? `✅ ${d.action} confirmed` : `🚫 ${d.action} cancelled`, confirm ? "artifact":"");
     }
@@ -199,10 +350,199 @@ async function resolveAction(d, confirm) {
 }
 function escapeHtml(s){ return s.replace(/[&<>]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
 
-function showArtifactPreview(p, type, payload) {
+function sendChatMessage(text) {
+  $("input").value = text;
+  $("chat").requestSubmit();
+}
+
+const QUESTION_TYPES = ["mcq_single", "mcq_multi", "true_false", "fib", "descriptive"];
+
+function renderQuizQuestion(q, idx, editable) {
+  const stem = q.questionText || q.stem || "(no question text)";
+  let html = `<div class="quiz-q" data-qidx="${idx}">`;
+  html += `<div class="q-num">Question ${idx + 1} · ${escapeHtml(q.questionType || "unknown")}`;
+  if (q.bloom_level) html += ` · ${escapeHtml(q.bloom_level)}`;
+  html += `</div><div class="q-stem">${escapeHtml(stem)}</div>`;
+  const opts = q.options || [];
+  if (opts.length) {
+    for (const o of opts) {
+      const correct = o.isCorrect === true || o.isCorrect === 1;
+      html += `<div class="q-opt${correct ? " correct" : ""}">${correct ? "✓ " : "○ "}${escapeHtml(o.optionText || "")}`;
+      if (o.misconception) html += ` <span style="color:var(--muted)">— ${escapeHtml(o.misconception)}</span>`;
+      html += `</div>`;
+    }
+  } else if (q.questionType === "true_false" && q.trueFalseAnswer != null) {
+    html += `<div class="q-opt correct">Answer: ${q.trueFalseAnswer ? "True" : "False"}</div>`;
+  } else if (q.fibUseRange) {
+    html += `<div class="q-meta">Numeric answer in [${q.fibRangeLower}, ${q.fibRangeUpper}]${q.solution?.unit ? " " + escapeHtml(q.solution.unit) : ""}</div>`;
+  } else if (q.blanks) {
+    html += `<div class="q-meta">Fill-in-the-blank: ${escapeHtml((q.blanks || []).flatMap(b => (b.answers || []).map(a => a.answerText)).join(", "))}</div>`;
+  }
+  if (q.solution && q.solution.solution_expr)
+    html += `<div class="q-meta">Worked solution: ${escapeHtml(q.solution.solution_expr)} = ${q.solution.answer}${q.solution.unit ? " " + escapeHtml(q.solution.unit) : ""}</div>`;
+  if (q.flags && q.flags.length)
+    html += `<div class="q-meta">⚠ ${escapeHtml(q.flags.join(", "))}</div>`;
+  const cite = q.citation;
+  if (cite && cite.quote)
+    html += `<div class="q-cite">Source: “${escapeHtml(String(cite.quote).slice(0, 200))}${cite.quote.length > 200 ? "…" : ""}”</div>`;
+  if (editable) {
+    const typeOpts = QUESTION_TYPES.map(t => `<option value="${t}"${t === q.questionType ? " selected" : ""}>${t}</option>`).join("");
+    html += `<div class="q-edit-actions">
+      <button data-op="edit_text">✏️ Edit text</button>
+      <button data-op="regenerate">↻ Regenerate</button>
+      <button data-op="replace_similar">⇄ Replace</button>
+      <select data-op="change_type" title="Change type">${typeOpts}</select>
+      <button data-op="flag">⚑ Flag</button>
+      <span class="q-spacer"></span>
+      <button class="q-danger" data-op="remove">🗑 Delete</button>
+    </div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+function attachDraftActions(card, buttons) {
+  const row = document.createElement("div");
+  row.className = "draft-actions";
+  for (const b of buttons) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = b.secondary ? "secondary" : (b.danger ? "danger" : "");
+    btn.textContent = b.label;
+    btn.onclick = () => sendChatMessage(b.message);
+    row.appendChild(btn);
+  }
+  card.appendChild(row);
+  scrollLog();
+}
+
+// ---- Quiz draft rendering + clickable per-question editing -------------
+function draftPreviewFromPayload(title, payload) {
+  const qs = (payload && payload.questions) || [];
+  return { title, warnings: (payload && payload.warnings) || [], summary_lines: [`${qs.length} question(s)`] };
+}
+
+function renderDraftCard(card, p, payload, artifactId, version) {
+  const questions = payload.questions || [];
+  const title = (p.title || "").replace(/^Publish assessment:\s*/i, "") || "Quiz draft";
+  const sources = payload.source_artifact_ids || (payload.source_artifact_id ? [payload.source_artifact_id] : []);
+  let html = `<div class="draft-title">📝 Quiz draft: ${escapeHtml(title)}${version ? ` <span style="color:var(--muted);font-weight:400">v${version}</span>` : ""}</div>`;
+  html += `<div style="color:var(--muted);font-size:12px;margin-bottom:10px">Review and edit each question below. Nothing is on mooKIT until you publish and confirm.</div>`;
+  if (sources.length > 1)
+    html += `<div style="color:var(--muted);font-size:12px;margin-bottom:8px">Sources: ${sources.length} documents (${escapeHtml(sources.join(", "))})</div>`;
+  if (p.summary_lines && p.summary_lines.length)
+    html += "<ul style='margin:8px 0;padding-left:18px;color:var(--muted)'>" +
+      p.summary_lines.map(s => `<li>${escapeHtml(s)}</li>`).join("") + "</ul>";
+  if (!questions.length)
+    html += `<div class="draft-body" style="color:var(--warn)">No questions in this draft yet.</div>`;
+  else
+    html += questions.map((q, i) => renderQuizQuestion(q, i, Boolean(artifactId))).join("");
+  card.innerHTML = html;
+  if (p.warnings && p.warnings.length) {
+    const w = document.createElement("ul");
+    w.style.cssText = "color:var(--warn);margin:8px 0;padding-left:18px";
+    w.innerHTML = p.warnings.map(x => `<li>⚠ ${escapeHtml(x)}</li>`).join("");
+    card.appendChild(w);
+  }
+  attachDraftActions(card, [
+    { label: "Publish to mooKIT", message: "Publish this quiz draft to the course" },
+    { label: "Add 2 questions", message: "Add 2 more mcq_single questions to this quiz", secondary: true },
+    { label: "Make harder", message: "Make this quiz harder — regenerate at a higher difficulty", secondary: true },
+    { label: "Keep as draft", message: "Keep it as a draft for now", secondary: true },
+  ]);
+}
+
+function setupQuizEditing(card, artifactId) {
+  if (!artifactId || card.dataset.editingWired) return;
+  card.dataset.editingWired = "1";
+  card.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-op]");
+    if (!btn) return;
+    const wrap = btn.closest(".quiz-q");
+    if (!wrap) return;
+    const index = Number(wrap.getAttribute("data-qidx"));
+    const op = btn.getAttribute("data-op");
+    if (op === "edit_text") {
+      const cur = wrap.querySelector(".q-stem")?.textContent || "";
+      const nt = prompt("Edit question text:", cur);
+      if (nt != null && nt.trim() && nt !== cur) editQuiz(card, artifactId, "edit_text", { index, questionText: nt });
+    } else if (op === "flag") {
+      editQuiz(card, artifactId, "flag", { index, reason: "instructor_flag" });
+    } else if (op === "remove") {
+      if (confirm("Delete question " + (index + 1) + "?")) editQuiz(card, artifactId, "remove", { index });
+    } else {
+      editQuiz(card, artifactId, op, { index });   // regenerate | replace_similar
+    }
+  });
+  card.addEventListener("change", (e) => {
+    const sel = e.target.closest("select[data-op='change_type']");
+    if (!sel) return;
+    const wrap = sel.closest(".quiz-q");
+    editQuiz(card, artifactId, "change_type", { index: Number(wrap.getAttribute("data-qidx")), qtype: sel.value });
+  });
+}
+
+async function editQuiz(card, artifactId, op, extra = {}) {
+  card.style.opacity = ".5";
+  try {
+    const r = await fetch(`${baseUrl()}/v1/quiz/${artifactId}/edit`, {
+      method: "POST", headers: headers({ "Content-Type": "application/json" }),
+      body: JSON.stringify(Object.assign({ op }, extra)),
+    });
+    const j = await r.json();
+    if (!r.ok || j.success === false) {
+      addChip("edit failed: " + (j.detail || j.message || ("HTTP " + r.status)), "err");
+      return;
+    }
+    const payload = j.payload || {};
+    renderDraftCard(card, draftPreviewFromPayload(j.title || "Quiz draft", payload), payload, artifactId, j.version);
+    addChip(`✏️ ${op} applied (v${j.version})`, "artifact");
+  } catch (e) {
+    addChip("edit failed: " + e.message, "err");
+  } finally {
+    card.style.opacity = "";
+  }
+}
+
+function showArtifactPreview(p, type, payload, artifactId, version) {
   const card = document.createElement("div");
   card.className = "msg assistant draft-preview";
   let html = "";
+  if (type === "assessment_draft" && payload) {
+    setupQuizEditing(card, artifactId);   // delegated per-question edit handlers (attached once)
+    renderDraftCard(card, p, payload, artifactId, version);
+    log.appendChild(card);
+    scrollLog();
+    return;
+  }
+  if (type === "lecture_draft" && payload) {
+    const title = payload.title || p.title || "Lecture draft";
+    html += `<div class="draft-title">🎬 Lecture draft: ${escapeHtml(title)}</div>`;
+    html += `<div style="color:var(--muted);font-size:12px;margin-bottom:10px">Nothing is on mooKIT until you publish and confirm. The video is uploaded to mooKIT at confirm time.</div>`;
+    if (p.summary_lines && p.summary_lines.length)
+      html += "<ul style='margin:8px 0;padding-left:18px;color:var(--muted)'>" +
+        p.summary_lines.map(s => `<li>${escapeHtml(s)}</li>`).join("") + "</ul>";
+    if (p.diff && p.diff.length) {
+      html += `<table class="diff" style="margin-top:10px"><tr><th>Field</th><th>Value</th></tr>` +
+        p.diff.map(r => `<tr><td>${escapeHtml(r.field)}</td><td>${escapeHtml(String(r.after ?? "—"))}</td></tr>`).join("") +
+        `</table>`;
+    }
+    if (payload.week_label)
+      html += `<div class="draft-body"><strong>Week:</strong> ${escapeHtml(payload.week_label)}</div>`;
+    if (payload.module_label)
+      html += `<div class="draft-body" style="margin-top:8px"><strong>Module:</strong> ${escapeHtml(payload.module_label)}</div>`;
+    if (payload.file_artifact_id)
+      html += `<div style="font-size:12px;color:var(--muted);margin-top:8px">Video file id: <code>${escapeHtml(payload.file_artifact_id)}</code></div>`;
+    card.innerHTML = html;
+    attachDraftActions(card, [
+      { label: "Publish lecture to mooKIT", message: "Publish this lecture draft to the course" },
+      { label: "Change week/title", message: "Change the week or title for this lecture draft", secondary: true },
+      { label: "Keep as draft", message: "Keep it as a draft for now", secondary: true },
+    ]);
+    log.appendChild(card);
+    scrollLog();
+    return;
+  }
   if (type === "announcement_draft" && payload) {
     html += `<div class="draft-title">📋 Draft announcement</div>`;
     html += `<div style="color:var(--muted);font-size:12px;margin-bottom:10px">This is exactly what will be posted to mooKIT if you confirm send.</div>`;
@@ -214,6 +554,14 @@ function showArtifactPreview(p, type, payload) {
     html += `<div class="draft-body">${escapeHtml(payload.title || "")}</div>`;
     html += `<div style="font-size:12px;color:var(--muted);margin-top:10px">Body (mooKIT <code>description</code>)</div>`;
     html += `<div class="draft-body">${escapeHtml(payload.description || "")}</div>`;
+    card.innerHTML = html;
+    attachDraftActions(card, [
+      { label: "Send to students", message: "Yes, send the announcement to all students" },
+      { label: "Keep as draft", message: "Keep it as a draft for now", secondary: true },
+    ]);
+    log.appendChild(card);
+    scrollLog();
+    return;
   } else {
     html += `<div class="draft-title">📋 ${escapeHtml(p.title || type)}</div>`;
     if (p.audience) html += `<div class="audience">To: ${escapeHtml(p.audience)}</div>`;
@@ -293,8 +641,9 @@ function handleSseFrame(frame, state) {
     addChip(`… ${d.tool}: ${d.message || (d.pct+"%")}`, "tool");
   } else if (ev === "artifact_updated") {
     state.lastArtifactType = d.type;
+    state.lastArtifactId = d.artifact_id;
     addChip(`📝 ${d.type} updated (v${d.version})`, "artifact");
-    if (d.preview) showArtifactPreview(d.preview, d.type, d.payload);
+    if (d.preview) showArtifactPreview(d.preview, d.type, d.payload, d.artifact_id, d.version);
   } else if (ev === "pending_confirmation") {
     showConfirm(d);
   } else if (ev === "error") {
@@ -317,13 +666,16 @@ $("chat").onsubmit = async (e) => {
   }
   $("input").value = "";
   $("send").disabled = true;
+  $("cancel").style.display = "";
+  chatAbort = new AbortController();
   addMsg("user", text);
-  const state = { assistantEl: null, sawDone: false, lastArtifactType: null };
+  const state = { assistantEl: null, sawDone: false, lastArtifactType: null, lastArtifactId: null };
 
   try {
     const r = await fetch(baseUrl() + "/v1/chat", {
       method:"POST", headers: headers({"Content-Type":"application/json"}),
       body: JSON.stringify({ message: text, sessionId }),
+      signal: chatAbort.signal,
     });
     if (!r.ok) { addChip(`HTTP ${r.status}: ${await r.text()}`, "err"); $("send").disabled=false; return; }
     const reader = r.body.getReader();
@@ -342,22 +694,43 @@ $("chat").onsubmit = async (e) => {
       for (const frame of parsed.frames) handleSseFrame(frame, state);
     }
     if (!state.assistantEl) addChip("(no assistant text — check tool chips above)", "");
-    if (state.lastArtifactType === "announcement_draft") {
+    if (state.lastArtifactType === "assessment_draft") {
+      addQuickActions([
+        { label: "Publish quiz to mooKIT", message: "Publish this quiz draft to the course" },
+        { label: "Add 2 more questions", message: "Add 2 more mcq_single questions to this quiz", secondary: true },
+        { label: "Keep as draft", message: "Keep it as a draft for now", secondary: true },
+      ]);
+    } else if (state.lastArtifactType === "lecture_draft") {
+      addQuickActions([
+        { label: "Publish lecture to mooKIT", message: "Publish this lecture draft to the course" },
+        { label: "Keep as draft", message: "Keep it as a draft for now", secondary: true },
+      ]);
+    } else if (state.lastArtifactType === "announcement_draft") {
       addQuickActions([
         { label: "Yes — send announcement", message: "Yes, send the announcement to all students" },
         { label: "Keep as draft", message: "Keep it as a draft for now", secondary: true },
       ]);
     }
   } catch (e) {
-    let msg = e.message || String(e);
-    if (msg === "Failed to fetch") {
-      msg = "cannot reach " + baseUrl() + " — use this page's host in Service URL (not localhost) and ensure the API container is running";
+    if (e.name === "AbortError") {
+      addChip("🚫 request cancelled", "");
+    } else {
+      let msg = e.message || String(e);
+      if (msg === "Failed to fetch") {
+        msg = "cannot reach " + baseUrl() + " — use this page's host in Service URL (not localhost) and ensure the API container is running";
+      }
+      addChip("stream error: " + msg, "err");
     }
-    addChip("stream error: " + msg, "err");
   } finally {
+    chatAbort = null;
     $("send").disabled = false;
+    $("cancel").style.display = "none";
     $("input").focus();
   }
+};
+
+$("cancel").onclick = () => {
+  if (chatAbort) chatAbort.abort();
 };
 </script>
 </body>

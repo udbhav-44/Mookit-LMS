@@ -22,6 +22,7 @@ class Evidence(BaseModel):
     span_id: str
     text: str
     locator: dict[str, Any]
+    source_doc_id: str | None = None  # which uploaded_file artifact this span came from
 
 
 class RetrieveFn(Protocol):
@@ -30,21 +31,33 @@ class RetrieveFn(Protocol):
     ) -> list[Any]: ...
 
 
+def _normalize_doc_ids(doc_artifact_id: str | list[str]) -> list[str]:
+    if isinstance(doc_artifact_id, str):
+        return [doc_artifact_id] if doc_artifact_id else []
+    return [d for d in doc_artifact_id if d]
+
+
 async def gather_evidence(
     retrieve: RetrieveFn,
     ctx: RequestContext,
-    doc_artifact_id: str,
+    doc_artifact_id: str | list[str],
     *,
     topics: list[str] | None,
     k: int,
 ) -> list[Evidence]:
-    """Pull relevant spans. Returns [] if nothing retrievable (caller must not hallucinate)."""
-    query = " ".join(topics) if topics else ""
-    spans = await retrieve(ctx, doc_artifact_id, query, k)
+    """Pull relevant spans from one or more documents. Returns [] if nothing retrievable."""
+    doc_ids = _normalize_doc_ids(doc_artifact_id)
+    if not doc_ids:
+        return []
+    query = " ".join(topics) if topics else "key concepts and important facts"
+    k_per = max(1, (k + len(doc_ids) - 1) // len(doc_ids))
     evidence: list[Evidence] = []
-    for s in spans:
-        evidence.append(_to_evidence(s))
-    return evidence
+    for doc_id in doc_ids:
+        spans = await retrieve(ctx, doc_id, query, k_per)
+        for s in spans:
+            ev = _to_evidence(s)
+            evidence.append(ev.model_copy(update={"source_doc_id": doc_id}))
+    return evidence[:k] if len(evidence) > k else evidence
 
 
 def _to_evidence(s: Any) -> Evidence:

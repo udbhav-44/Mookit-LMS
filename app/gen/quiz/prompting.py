@@ -8,11 +8,21 @@ is spotlighted (delimited, labeled as data) so injected instructions in the sour
 
 from __future__ import annotations
 
+from pydantic import BaseModel, Field
+
 from app.gen.quiz.params import QuizParams
 from app.gen.quiz.rag import Evidence
 from app.gen.quiz.schemas import BloomLevel, QuestionType
 
-PERSONA = "You are a graduate-level instructor writing assessment questions."
+PERSONA = "You are a graduate-level engineering instructor writing assessment questions."
+
+
+class GenDirectives(BaseModel):
+    """Per-question generation guidance derived from the blueprint concept(s) a slot targets."""
+
+    quantitative: bool = False  # produce a problem-solving item with a checkable numeric answer
+    formulas: list[str] = Field(default_factory=list)  # verbatim source formulas to ground the problem
+    misconceptions: list[str] = Field(default_factory=list)  # documented misconceptions → distractors
 
 BLOOM_DEFINITIONS: dict[BloomLevel, str] = {
     "remember": "Remember: recall facts and basic concepts (define, list, state).",
@@ -64,6 +74,7 @@ def build_quiz_prompt(
     qtype: QuestionType,
     params: QuizParams,
     delimiter: str,
+    directives: GenDirectives | None = None,
 ) -> str:
     """Assemble a lean PS4 prompt for ONE question of the given type + Bloom level."""
     exemplars = _EXEMPLARS.get(bloom_level, [])[:2]
@@ -79,7 +90,32 @@ def build_quiz_prompt(
         "",
         "Think step by step about which fact to test, then produce the question.",
     ]
+    lines += _directive_lines(directives, qtype)
     if exemplars:
         lines += ["", "Example(s):", *exemplars]
     lines += ["", spotlight_evidence(evidence, delimiter=delimiter)]
     return "\n".join(lines)
+
+
+def _directive_lines(directives: GenDirectives | None, qtype: QuestionType) -> list[str]:
+    if directives is None:
+        return []
+    lines: list[str] = []
+    if directives.misconceptions:
+        joined = "; ".join(directives.misconceptions)
+        lines += ["", f"Base the distractors on these documented misconceptions: {joined}."]
+    if directives.quantitative:
+        if directives.formulas:
+            lines += ["", f"Use ONLY these source formulas/relationships: {'; '.join(directives.formulas)}."]
+        lines += [
+            "",
+            "This is a QUANTITATIVE problem. Pose a calculation whose inputs and governing formula "
+            "come from the source. State the numeric answer.",
+        ]
+        if qtype == "fib":
+            lines += [
+                "Also return a 'solution': solution_expr (the formula with variable names), the "
+                "variables and their numeric values, the resulting answer, and the unit. The "
+                "solution_expr evaluated on the variables MUST equal the answer.",
+            ]
+    return lines
