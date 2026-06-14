@@ -26,6 +26,7 @@ from arq.connections import RedisSettings
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ..config import settings
+from ..diagrams.pipeline import run_diagram_pipeline
 from ..files.sandbox import ExtractionError, ExtractionSandbox
 from ..store.db import FileMeta
 
@@ -105,7 +106,7 @@ async def extract_and_index_file(
         "char_count": len(text),
     })
 
-    await _set_progress(redis, tenant_key, job_id, 100, f"Done — {len(chunks)} chunks indexed.", status="complete")
+    await _set_progress(redis, tenant_key, job_id, 90, f"Text indexed — {len(chunks)} chunks.")
 
     async with session_factory() as db:
         from sqlalchemy import update
@@ -117,6 +118,34 @@ async def extract_and_index_file(
         await db.commit()
 
     logger.info("File indexed: file_id=%s tenant=%s chunks=%d", file_id, tenant_key, len(chunks))
+
+    # ── Phase 2: diagram extraction (PDF only) ────────────────────────────────
+    # Runs after RAG indexing; failures are non-fatal and do not affect the index.
+    try:
+        await _set_progress(redis, tenant_key, job_id, 92, "Extracting diagrams from PDF…")
+
+        async def _diagram_progress(pct: int, msg: str) -> None:
+            overall = 92 + round(pct * 7 / 100)
+            await _set_progress(redis, tenant_key, job_id, overall, msg)
+
+        diagram_result = await run_diagram_pipeline(
+            file_id=file_id,
+            file_path=file_path,
+            tenant_key=tenant_key,
+            upload_dir=settings.limits.upload_dir,
+            openai_api_key=settings.openai.api_key.get_secret_value(),
+            openai_model=settings.openai.model,
+            redis=redis,
+            progress_cb=_diagram_progress,
+        )
+        logger.info(
+            "Diagram extraction done: file_id=%s status=%s diagrams=%d",
+            file_id, diagram_result.status, diagram_result.total_diagrams,
+        )
+    except Exception as exc:
+        logger.error("Diagram pipeline error for file_id=%s: %s", file_id, exc)
+
+    await _set_progress(redis, tenant_key, job_id, 100, "Done.", status="complete")
     return {"status": "complete", "chunks": len(chunks)}
 
 

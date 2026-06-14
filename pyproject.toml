@@ -56,6 +56,8 @@ dependencies = [
     # PDF → page-image rendering for vision comprehension (permissively licensed, no system deps)
     "pypdfium2>=4.0",
     "pillow>=10.0",
+    # PyMuPDF for diagram extraction pipeline (high-fidelity rendering + graphics detection)
+    "pymupdf>=1.24.0",
 
     # File type validation
     "python-magic>=0.4.27",

@@ -55,7 +55,9 @@ async def confirm_action(
     require_action_permission(ctx, action.action)
 
     executor = DeterministicExecutor(
-        request.app.state.mookit_client, session_factory=request.app.state.session_factory
+        request.app.state.mookit_client,
+        session_factory=request.app.state.session_factory,
+        redis=getattr(request.app.state, "redis", None),
     )
 
     try:

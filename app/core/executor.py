@@ -16,9 +16,11 @@ Payload shapes (produced by Dev B publish tools):
   publish_lecture:    LectureCreate fields + optional _resource + provenance  → create → attach resource
 """
 
+import logging
 from typing import Any
 
 from ..contracts.context import RequestContext
+from ..diagrams.pipeline import get_diagram_result
 from ..mookit.client import MooKitClient
 from ..mookit.schemas import (
     AnnouncementCreate,
@@ -28,6 +30,8 @@ from ..mookit.schemas import (
     QuestionCreate,
     SectionCreate,
 )
+
+logger = logging.getLogger(__name__)
 
 # Maps action name → (resource, mooKIT action string) for permission re-validation.
 ACTION_TO_RESOURCE: dict[str, tuple[str, str]] = {
@@ -43,6 +47,30 @@ ACTION_TO_RESOURCE: dict[str, tuple[str, str]] = {
 }
 
 
+def _match_diagram(question_text: str, diagram_map: "dict[str, int]") -> "int | None":
+    """Return the mooKIT fileId whose stored question_text best matches `question_text`.
+
+    Uses word-overlap (Jaccard) so minor rephrasing between the PDF extractor and the
+    quiz generator doesn't break the match. Requires at least 30% overlap to avoid false
+    positives when a document has many short questions.
+    """
+    if not diagram_map or not question_text:
+        return None
+    q_words = set(question_text.lower().split())
+    best_score = 0.0
+    best_id: int | None = None
+    for stored_text, file_id in diagram_map.items():
+        s_words = set(stored_text.lower().split())
+        union = q_words | s_words
+        if not union:
+            continue
+        score = len(q_words & s_words) / len(union)
+        if score > best_score:
+            best_score = score
+            best_id = file_id
+    return best_id if best_score >= 0.30 else None
+
+
 def _entity_id(result: Any) -> int | None:
     if isinstance(result, dict):
         return result.get("id")
@@ -50,9 +78,10 @@ def _entity_id(result: Any) -> int | None:
 
 
 class DeterministicExecutor:
-    def __init__(self, mookit_client: MooKitClient, session_factory=None):
+    def __init__(self, mookit_client: MooKitClient, session_factory=None, redis=None):
         self.mookit = mookit_client
         self.session_factory = session_factory  # for resolving stored uploads (FileMeta)
+        self._redis = redis                     # for reading diagram extraction results
 
     async def execute(self, ctx: RequestContext, action: str, payload: dict) -> Any:
         """Execute a confirmed action against the live mooKIT API. All params come from storage."""
@@ -78,6 +107,16 @@ class DeterministicExecutor:
         assessment_id = _entity_id(created)
 
         if assessment_id is not None:
+            # Build a question_text → mooKIT fileId map from any diagram results stored for the
+            # source documents. Diagrams are uploaded to mooKIT here (once) before questions are
+            # created so we can attach the returned mooKIT fileId via QuestionCreate.fileIds.
+            source_ids: list[str] = (
+                payload.get("provenance", {}).get("source_ids")
+                or payload.get("source_artifact_ids")
+                or []
+            )
+            diagram_file_ids = await self._upload_diagrams_for_assessment(ctx, source_ids, assessment_id)
+
             # mooKIT requires questions to live under a section; create one, then add questions to it.
             section = await self.mookit.create_section(
                 ctx, atype, int(assessment_id),
@@ -85,6 +124,13 @@ class DeterministicExecutor:
             )
             section_id = _entity_id(section) or 0
             for q in payload.get("questions", []):
+                # Inject diagram fileId if one was matched for this question's text.
+                q = dict(q)
+                q_text = q.get("questionText", "")
+                matched_file_id = _match_diagram(q_text, diagram_file_ids)
+                if matched_file_id is not None:
+                    existing = q.get("fileIds") or []
+                    q["fileIds"] = list({*existing, matched_file_id})
                 await self.mookit.add_question(
                     ctx, atype, int(assessment_id), int(section_id), QuestionCreate(**q)
                 )
@@ -93,6 +139,49 @@ class DeterministicExecutor:
                 ctx, atype, int(assessment_id), {"published": {"status": 1, "releaseOn": None}}
             )
         return created
+
+    async def _upload_diagrams_for_assessment(
+        self, ctx: RequestContext, source_ids: list[str], assessment_id: Any
+    ) -> "dict[str, int]":
+        """Return {question_text: mooKIT_file_id} for every diagram linked to the source docs.
+
+        Uploads each cropped diagram PNG to mooKIT /files/add scoped to the new assessment so
+        it is stored as a managed file and its integer id can be passed to QuestionCreate.fileIds.
+        Failures are non-fatal — a missing diagram never blocks question creation.
+        """
+        if not self._redis or not source_ids:
+            return {}
+
+        result: dict[str, int] = {}
+        for doc_id in source_ids:
+            try:
+                diagram_result = await get_diagram_result(self._redis, ctx.tenant_key, doc_id)
+            except Exception as exc:
+                logger.warning("Could not load diagram result for doc_id=%s: %s", doc_id, exc)
+                continue
+            if diagram_result is None or not diagram_result.diagrams:
+                continue
+
+            for info in diagram_result.diagrams:
+                try:
+                    with open(info.diagram_path, "rb") as f:
+                        managed = await self.mookit.upload_file(
+                            ctx,
+                            {"files": (info.diagram_file, f, "image/png")},
+                            entity_type="assessments",
+                            entity_id=int(assessment_id),
+                        )
+                    if managed:
+                        result[info.question_text] = managed[0].id
+                        logger.info(
+                            "Uploaded diagram for question '%.60s' → mooKIT fileId=%d",
+                            info.question_text, managed[0].id,
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to upload diagram %s: %s", info.diagram_file, exc
+                    )
+        return result
 
     # ------------------------------------------------------------------
     # Announcement: resolve audience server-side → create with status=1

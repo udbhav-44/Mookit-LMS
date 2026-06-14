@@ -187,8 +187,10 @@ async def file_status(
     request: Request,
     ctx: RequestContext = Depends(get_request_context),
 ):
-    """Poll extraction progress.  Returns the FileMeta status and ARQ job progress."""
+    """Poll extraction progress.  Returns the FileMeta status, ARQ job progress, and
+    diagram extraction results (available after the background job completes phase 2)."""
     from sqlalchemy import select
+    from ..diagrams.pipeline import get_diagram_result
     async with request.app.state.session_factory() as session:
         result = await session.execute(
             select(FileMeta).where(
@@ -225,6 +227,10 @@ async def file_status(
                 )
             ).scalar_one()
 
+    diagram_result = await get_diagram_result(
+        request.app.state.redis, ctx.tenant_key, file_id
+    )
+
     return {
         "fileId": file_id,
         "filename": meta.filename,
@@ -234,6 +240,7 @@ async def file_status(
         "progress": progress,
         "fileKind": "video" if _is_video_filename(meta.filename) else "document",
         "ready": meta.extraction_status in ("indexed", "stored"),
+        "diagrams": diagram_result.model_dump() if diagram_result else None,
     }
 
 
