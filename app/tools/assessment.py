@@ -226,14 +226,20 @@ class PublishAssessmentTool(Tool):
         citations = [q.get("citation") for q in questions]
         # Executor-compatible composite payload: create assessment (status 0) → add questions →
         # publish (status 1). Magic key `_type` selects quizzes|exams|assignments.
+        assessment_body = _default_assessment_create(draft.title)
         payload: dict[str, Any] = {
             "_type": parsed.assessment_type,
-            "assessment": _default_assessment_create(draft.title),
+            "assessment": assessment_body,
             "questions": mookit_questions,
             "citations": citations,        # carried for audit/provenance; not sent to QuestionCreate
             "provenance": draft.provenance,
         }
-        preview = build_assessment_preview(title=draft.title, questions=questions)
+        preview = build_assessment_preview(
+            title=draft.title,
+            questions=questions,
+            assessment=assessment_body,
+            assessment_type=parsed.assessment_type,
+        )
         return ProposedAction(
             action="publish_assessment",
             target_ref={"assessment_type": parsed.assessment_type, "draft_id": parsed.draft_id},

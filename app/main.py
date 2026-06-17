@@ -35,7 +35,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from .api import announcement, chat, confirm, files, health, meta, quiz, sessions
+from .api import (
+    announcement,
+    chat,
+    confirm,
+    files,
+    health,
+    lecture,
+    meta,
+    quiz,
+    sessions,
+    taxonomy,
+)
 from .audit.logger import AuditLogger
 from .config import settings
 from .mookit.client import MooKitClient
@@ -263,6 +274,8 @@ app.include_router(quiz.router,     prefix="/v1",          tags=["quiz"])
 app.include_router(announcement.router, prefix="/v1",    tags=["announcement"])
 app.include_router(confirm.router,  prefix="/v1",          tags=["confirm"])
 app.include_router(meta.router,     prefix="/v1",          tags=["meta"])
+app.include_router(taxonomy.router, prefix="/v1",          tags=["taxonomy"])
+app.include_router(lecture.router,  prefix="/v1",          tags=["lecture"])
 
 # ── Sample UI (static) ────────────────────────────────────────────────────────
 # Served at /ui for local demos; the production chat UI is built by the mooKIT frontend team.

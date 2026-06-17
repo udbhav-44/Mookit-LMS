@@ -340,6 +340,31 @@ class Orchestrator:
                 "content_hash": result.content_hash,
                 "preview": result.preview.model_dump(),
             }
+            # Surface the editable settings so the confirm modal can prefill the real defaults
+            # (dates/timing for a quiz, audience/email/schedule for an announcement) instead of
+            # guessing. These are the instructor's own draft values — never resolved recipient ids.
+            if result.action == "publish_assessment":
+                a = result.payload.get("assessment", {})
+                data["settings"] = {
+                    "assessment_type": result.payload.get("_type", "quizzes"),
+                    "startDate": a.get("startDate"),
+                    "endDate": a.get("endDate"),
+                    "endDapDate": a.get("endDapDate"),
+                    "resultsDate": a.get("resultsDate"),
+                    "timed": a.get("timed", 0),
+                    "duration": a.get("duration"),
+                    "instructions": a.get("instructions"),
+                    "showCorrectAnswers": a.get("showCorrectAnswers", 0),
+                    "retakeAllowed": a.get("retakeAllowed", 0),
+                }
+            elif result.action == "send_announcement":
+                data["settings"] = {
+                    "audience_intent": result.payload.get("_audience_intent", "all"),
+                    "notifyMail": result.payload.get("notifyMail", 0),
+                    "type": result.payload.get("type", "normal"),
+                    "published": result.payload.get("published", {"status": 1, "releaseOn": None}),
+                    "fileIds": result.payload.get("fileIds", []),
+                }
             if self._proposal_sink is not None:
                 action_id, confirm_token = await self._proposal_sink(ctx, result)
                 ttl = self._settings.security.confirm_token_ttl_seconds

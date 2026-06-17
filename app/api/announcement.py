@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
+from ..config import settings
 from ..contracts.context import RequestContext
 from ..core.context import get_request_context
 from ..gen.provenance import mark_edited
@@ -15,6 +16,51 @@ from ..preview.render import sanitize_markdown
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+@router.post("/announcement/attach")
+async def attach_announcement_file(
+    request: Request,
+    file: UploadFile = File(...),
+    ctx: RequestContext = Depends(get_request_context),
+):
+    """Upload one attachment for an announcement to mooKIT and return its managed file id.
+
+    Staged with ``entityType=announcements`` / ``entityId=0`` (announcements accept the file before
+    the announcement exists; mooKIT links them on send via ``fileIds``). mooKIT enforces the
+    per-entity format allow-list, so we forward the bytes and surface its rejection rather than
+    duplicating the list here.
+    """
+    if not ctx.permissions.has_permission("announcements", "create"):
+        raise HTTPException(status_code=403, detail="Missing announcements:create permission.")
+
+    content = await file.read()
+    max_bytes = settings.limits.max_file_size_bytes
+    if len(content) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large: {len(content)} bytes (max {max_bytes} bytes).",
+        )
+
+    filename = file.filename or "attachment"
+    mookit = getattr(request.app.state, "mookit_client", None)
+    if mookit is None:
+        raise HTTPException(status_code=503, detail="mooKIT client unavailable.")
+
+    try:
+        managed = await mookit.upload_file(
+            ctx,
+            {"files": (filename, content, file.content_type or "application/octet-stream")},
+            entity_type="announcements",
+            entity_id=0,
+        )
+    except Exception as exc:  # noqa: BLE001 — surface mooKIT's own validation message
+        logger.warning("Announcement attachment upload failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Attachment upload failed: {exc}") from exc
+
+    if not managed:
+        raise HTTPException(status_code=502, detail="mooKIT returned no file for the attachment.")
+    return {"success": True, "fileId": managed[0].id, "filename": filename}
 
 
 class AnnouncementEditBody(BaseModel):

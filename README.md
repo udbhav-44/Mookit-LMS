@@ -135,9 +135,15 @@ MOOKIT_TOKEN=<jwt> uv run python scripts/probe_mookit.py   # IITK network
 1. **Cancel today's class**
 2. Draft card shows **Subject** + **Body** (exact mooKIT payload), audience, channel, priority.
 3. Click **Yes — send announcement** (or type it).
-4. **Confirm** modal → **Confirm** → `✅ Announcement sent (id …)`.
-5. **Cancel path**: repeat, click **Cancel** in modal → no write.
-6. **Edit**: `Make the tone softer and mention class resumes Monday` → revised draft.
+4. **Confirm** modal exposes the de-hardcoded controls:
+   - **Audience** dropdown — `All students` + live sections from `GET /v1/taxonomy` (no invented names).
+   - **Also send email** toggle (`notifyMail`).
+   - **Schedule for later** + datetime → `published.status=0` + `releaseOn`; blank = send now.
+   - **Attachments** — pick a file → **Attach** (`POST /v1/announcement/attach`) → appears as a removable chip; ids ride `fileIds` on send.
+5. **Confirm** → `✅ Announcement sent (id …)`.
+6. **Cancel path**: repeat, click **Cancel** in modal → no write.
+7. **Bad section**: pick a section, then delete it in mooKIT before confirming → revise/confirm refuses fail-closed (not broadcast to all).
+8. **Edit**: `Make the tone softer and mention class resumes Monday` → revised draft.
 
 ### Phase 3 — Quiz from document
 
@@ -145,14 +151,19 @@ MOOKIT_TOKEN=<jwt> uv run python scripts/probe_mookit.py   # IITK network
 2. Wait for worker indexing (`./logs.sh worker`).
 3. `Create a quiz from this document — 5 questions, mixed types`
 4. `Add 2 true/false questions` → version bump.
-5. `Publish this quiz to the course` → Confirm modal → Confirm.
-6. Verify assessment in mooKIT (optional).
+5. `Publish this quiz to the course` → **Confirm** modal exposes quiz settings (de-hardcoded):
+   - **Type** (Quiz / Exam / Assignment), **Opens / Closes / Results** datetimes (validated ordering).
+   - **Timed** + duration (minutes), **Show answers**, **Allow retakes**, **Instructions**.
+   - Preview card lines reflect exactly what is sent.
+6. **Confirm** → verify assessment in mooKIT (optional, with the chosen dates/type).
 
 ### Phase 4 — Lecture
 
 1. Upload a video or document.
-2. `Publish this under Week 4`
-3. `Publish this lecture` → Confirm modal (diff: week, title, attachments) → Confirm.
+2. Pick a **week** from the live dropdown (and optional **module**) in the lecture controls.
+3. `Publish this lecture` → Confirm modal (diff: resolved week/module label, title, schedule, attachments) → Confirm.
+4. Optional: `POST /v1/lecture/{draft_id}/edit` re-resolves the week/module against live taxonomy.
+5. **Empty taxonomy**: a course with no weeks shows the *"No weeks configured — add them in mooKIT"* hint and disables the week picker.
 
 ### Phase 5 — Safety
 

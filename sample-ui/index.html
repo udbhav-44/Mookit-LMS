@@ -17,6 +17,8 @@
   .cfg { margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
   .cfg input { background:var(--panel2); border:1px solid var(--border); color:var(--txt);
                border-radius:6px; padding:5px 8px; font-size:12px; width:150px; }
+  .cfg select { background:var(--panel2); border:1px solid var(--border); color:var(--txt);
+                border-radius:6px; padding:5px 8px; font-size:12px; max-width:230px; }
   #new-session { font-size:12px; padding:6px 10px; }
   main { max-width:860px; margin:0 auto; padding:18px; }
   #log { display:flex; flex-direction:column; gap:12px; min-height:50vh; }
@@ -223,7 +225,8 @@
     <input id="cfg-course" placeholder="course" value="coursetest" />
     <input id="cfg-uid" placeholder="uid" value="1" />
     <input id="cfg-token" placeholder="token (JWT)" value="" />
-    <button class="secondary" id="new-session" title="Start a fresh conversation">New session</button>
+    <select id="session-picker" title="Reopen a previous chat"><option value="">▾ Recent chats</option></select>
+    <button class="secondary" id="new-session" title="Start a fresh conversation">New chat</button>
   </div>
 </header>
 <div id="meta-banner"></div>
@@ -240,7 +243,7 @@
       <label for="lecture-week">Lecture week:</label>
       <select id="lecture-week"></select>
       <label for="lecture-module">Module:</label>
-      <input type="text" id="lecture-module" placeholder="(optional)" />
+      <select id="lecture-module"><option value="">(optional)</option></select>
       <label for="lecture-release">Release:</label>
       <input type="datetime-local" id="lecture-release" title="Leave blank to publish immediately" />
     </div>
@@ -791,12 +794,17 @@ function offerQuizActions(readyDocs) {
   ]);
 }
 
+function _selectedLabel(id) {
+  const sel = $(id);
+  const opt = sel?.selectedOptions?.[0];
+  return (opt?.dataset?.name || opt?.textContent || "").trim();
+}
 function lectureMessageFor(v) {
-  const week = $("lecture-week").value || "4";
-  const module = $("lecture-module").value.trim();
+  const weekLabel = _selectedLabel("lecture-week") || "Week 4";
+  const moduleLabel = $("lecture-module")?.value ? _selectedLabel("lecture-module") : "";
   const release = $("lecture-release").value;
-  let msg = `Publish this video lecture under Week ${week}`;
-  if (module) msg += ` in module "${module}"`;
+  let msg = `Publish this video lecture under ${weekLabel}`;
+  if (moduleLabel) msg += ` in module "${moduleLabel}"`;
   if (release) msg += ` scheduled for ${release}`;
   msg += ` — file ${v.id} (${v.name})`;
   return msg;
@@ -943,17 +951,73 @@ $("upload").onclick = async () => {
   finally { $("upload").disabled = false; updateFilesPanelSummary(); }
 };
 
-// Populate lecture week selector
-(function initWeekPicker() {
-  const sel = $("lecture-week");
-  for (let w = 1; w <= 16; w++) {
+// ---- Live course taxonomy (week / module / section) ------------------------
+// Populated from GET /v1/taxonomy so the UI never hardcodes Week 1–16 or invents sections.
+let appTaxonomy = { week: [], module: [], section: [] };
+let taxonomyLoaded = false;
+
+function _fillSelect(sel, terms, { placeholder = null } = {}) {
+  if (!sel) return;
+  sel.innerHTML = "";
+  if (placeholder !== null) {
     const opt = document.createElement("option");
-    opt.value = String(w);
-    opt.textContent = "Week " + w;
-    if (w === 4) opt.selected = true;
+    opt.value = "";
+    opt.textContent = placeholder;
     sel.appendChild(opt);
   }
-})();
+  for (const t of terms) {
+    const opt = document.createElement("option");
+    opt.value = String(t.id);          // term id (resolved server-side)
+    opt.dataset.name = t.name;         // human label for message/preview
+    opt.textContent = t.name;
+    sel.appendChild(opt);
+  }
+}
+
+// Reflect taxonomy availability in the lecture controls — disable publish-by-week when a course
+// has no weeks configured rather than silently sending an unresolved label.
+function applyTaxonomyState() {
+  const weekSel = $("lecture-week");
+  const hasWeeks = (appTaxonomy.week || []).length > 0;
+  if (weekSel) weekSel.disabled = !hasWeeks;
+  const ctrls = document.querySelector(".lecture-controls");
+  let hint = $("lecture-taxonomy-hint");
+  if (!hasWeeks && taxonomyLoaded) {
+    if (!hint && ctrls) {
+      hint = document.createElement("span");
+      hint.id = "lecture-taxonomy-hint";
+      hint.style.cssText = "color:var(--danger);font-size:12px";
+      hint.textContent = "No weeks configured in this course — add them in mooKIT first";
+      ctrls.appendChild(hint);
+    }
+  } else if (hint) {
+    hint.remove();
+  }
+}
+
+async function loadTaxonomy() {
+  try {
+    const r = await fetch(baseUrl() + "/v1/taxonomy", { headers: headers() });
+    if (!r.ok) { taxonomyLoaded = true; applyTaxonomyState(); return; }
+    const st = await r.json();
+    const data = st.data || st;
+    appTaxonomy = {
+      week: data.week || [],
+      module: data.module || [],
+      section: data.section || [],
+    };
+    taxonomyLoaded = true;
+    _fillSelect($("lecture-week"), appTaxonomy.week);
+    _fillSelect($("lecture-module"), appTaxonomy.module, { placeholder: "(optional)" });
+    // Default the week selector to "Week 4" when present (keeps the old demo default), else first.
+    const weekSel = $("lecture-week");
+    if (weekSel && appTaxonomy.week.length) {
+      const wk4 = appTaxonomy.week.find((t) => /\bweek\s*4\b/i.test(t.name));
+      weekSel.value = String((wk4 || appTaxonomy.week[0]).id);
+    }
+    applyTaxonomyState();
+  } catch (_) { taxonomyLoaded = true; applyTaxonomyState(); }
+}
 
 // ---- Modal infrastructure (focus trap, Esc, restore focus) -----------------
 let _modalPrevFocus = null;
@@ -1019,6 +1083,144 @@ function confirmModal(title, message) {
 }
 
 // ---- Confirm dialog ----------------------------------------------------
+function unixToLocalInput(ts) {
+  if (!ts) return "";
+  const d = new Date(ts * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function localInputToUnix(v) {
+  if (!v) return null;
+  const ms = new Date(v).getTime();
+  return Number.isNaN(ms) ? null : Math.floor(ms / 1000);
+}
+
+// Quiz settings sub-form for the publish_assessment confirm modal. Prefilled from d.settings
+// (the draft's real defaults) so it is exactly what will be created on mooKIT.
+function quizSettingsForm(s) {
+  s = s || {};
+  const type = s.assessment_type || "quizzes";
+  const opt = (v, label) => `<option value="${v}"${type === v ? " selected" : ""}>${label}</option>`;
+  const timed = !!s.timed;
+  return `
+  <div class="quiz-settings" style="margin-top:10px;display:grid;gap:8px">
+    <label class="qs-row"><span>Type</span>
+      <select id="cf-q-type">${opt("quizzes", "Quiz")}${opt("exams", "Exam")}${opt("assignments", "Assignment")}</select>
+    </label>
+    <label class="qs-row"><span>Opens</span>
+      <input type="datetime-local" id="cf-q-start" value="${unixToLocalInput(s.startDate)}" /></label>
+    <label class="qs-row"><span>Closes</span>
+      <input type="datetime-local" id="cf-q-end" value="${unixToLocalInput(s.endDate)}" /></label>
+    <label class="qs-row"><span>Results</span>
+      <input type="datetime-local" id="cf-q-results" value="${unixToLocalInput(s.resultsDate)}" /></label>
+    <label class="qs-row"><span>Timed</span>
+      <span><input type="checkbox" id="cf-q-timed"${timed ? " checked" : ""} />
+      <input type="number" id="cf-q-duration" min="1" placeholder="minutes" value="${s.duration ?? ""}" style="width:90px"${timed ? "" : " disabled"} /></span></label>
+    <label class="qs-row"><span>Show answers</span>
+      <input type="checkbox" id="cf-q-show"${s.showCorrectAnswers ? " checked" : ""} /></label>
+    <label class="qs-row"><span>Allow retakes</span>
+      <input type="checkbox" id="cf-q-retake"${s.retakeAllowed ? " checked" : ""} /></label>
+    <label class="qs-row" style="align-items:flex-start"><span>Instructions</span>
+      <textarea id="cf-q-instr" rows="2" placeholder="(optional)">${escapeHtml(s.instructions || "")}</textarea></label>
+  </div>`;
+}
+
+// Read + validate the quiz settings form → a ReviseAssessmentBody, or null with a toast on error.
+function readQuizSettings() {
+  const start = localInputToUnix($("cf-q-start")?.value);
+  const end = localInputToUnix($("cf-q-end")?.value);
+  const results = localInputToUnix($("cf-q-results")?.value);
+  const timed = $("cf-q-timed")?.checked ? 1 : 0;
+  const duration = $("cf-q-duration")?.value ? parseInt($("cf-q-duration").value, 10) : null;
+  if (start == null || end == null || results == null) { toast("Set the open, close and results dates", "warn"); return null; }
+  if (end < start) { toast("Close date must be on or after the open date", "warn"); return null; }
+  if (results < end) { toast("Results date must be on or after the close date", "warn"); return null; }
+  if (timed && (!duration || duration < 1)) { toast("Enter a duration (minutes) for a timed quiz", "warn"); return null; }
+  return {
+    assessment_type: $("cf-q-type")?.value || "quizzes",
+    start_date: start, end_date: end, end_dap_date: end, results_date: results,
+    timed, duration: timed ? duration : null,
+    instructions: ($("cf-q-instr")?.value || "").trim() || null,
+    show_correct_answers: $("cf-q-show")?.checked ? 1 : 0,
+    retake_allowed: $("cf-q-retake")?.checked ? 1 : 0,
+  };
+}
+
+// Announcement controls (audience / email / schedule / attachments) for the confirm modal.
+let _annAttachments = [];  // [{fileId, filename}] staged for this modal
+function announcementControls(s) {
+  s = s || {};
+  const sections = appTaxonomy.section || [];
+  const intent = (s.audience_intent || "all").toString().toLowerCase();
+  const optAll = `<option value="all"${intent === "all" || intent === "all students" ? " selected" : ""}>All students</option>`;
+  const opts = sections.map((t) =>
+    `<option value="${t.id}" data-name="${escapeHtml(t.name)}"${intent === t.name.toLowerCase() ? " selected" : ""}>${escapeHtml(t.name)}</option>`
+  ).join("");
+  const emailOn = !!s.notifyMail;
+  const pub = s.published || {};
+  const scheduled = pub.status === 0 && pub.releaseOn;
+  return `
+  <div class="ann-controls" style="margin-top:10px;display:grid;gap:8px">
+    <label class="qs-row"><span>Audience</span>
+      <select id="cf-ann-aud">${optAll}${opts}</select></label>
+    <label class="qs-row"><span>Also send email</span>
+      <input type="checkbox" id="cf-ann-email"${emailOn ? " checked" : ""} /></label>
+    <label class="qs-row"><span>Schedule for later</span>
+      <span><input type="checkbox" id="cf-ann-sched"${scheduled ? " checked" : ""} />
+      <input type="datetime-local" id="cf-ann-when" value="${scheduled ? unixToLocalInput(pub.releaseOn) : ""}"${scheduled ? "" : " disabled"} /></span></label>
+    <label class="qs-row" style="align-items:flex-start"><span>Attachments</span>
+      <span><input type="file" id="cf-ann-file" /><button type="button" class="secondary" id="cf-ann-attach">Attach</button>
+      <div id="cf-ann-files" style="margin-top:6px;font-size:12px"></div></span></label>
+  </div>`;
+}
+function renderAnnAttachments() {
+  const box = $("cf-ann-files");
+  if (!box) return;
+  box.innerHTML = _annAttachments.map((a, i) =>
+    `<div>📎 ${escapeHtml(a.filename)} (id ${a.fileId}) <button type="button" class="link" data-rm="${i}">remove</button></div>`
+  ).join("");
+  box.querySelectorAll("[data-rm]").forEach((b) =>
+    b.onclick = () => { _annAttachments.splice(parseInt(b.dataset.rm, 10), 1); renderAnnAttachments(); });
+}
+async function uploadAnnAttachment() {
+  const inp = $("cf-ann-file");
+  const f = inp?.files?.[0];
+  if (!f) { toast("Choose a file to attach", "warn"); return; }
+  const btn = $("cf-ann-attach");
+  if (btn) btn.disabled = true;
+  try {
+    const fd = new FormData();
+    fd.append("file", f);
+    const r = await fetch(baseUrl() + "/v1/announcement/attach", { method: "POST", headers: headers(), body: fd });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { surfaceError(r.status, j.detail, "attach file"); return; }
+    _annAttachments.push({ fileId: j.fileId, filename: j.filename });
+    inp.value = "";
+    renderAnnAttachments();
+  } catch (e) { surfaceError(0, e.message, "attach file"); }
+  finally { if (btn) btn.disabled = false; }
+}
+function readAnnouncementSettings(annEdits) {
+  const audSel = $("cf-ann-aud");
+  const audVal = audSel?.value || "all";
+  const audience = audVal === "all" ? "all" : parseInt(audVal, 10);
+  const audience_label = audVal === "all" ? "all students" : (audSel.selectedOptions[0]?.dataset?.name || "");
+  const scheduled = $("cf-ann-sched")?.checked;
+  let schedule_at = null;
+  if (scheduled) {
+    schedule_at = localInputToUnix($("cf-ann-when")?.value);
+    if (!schedule_at) { toast("Pick a date/time to schedule", "warn"); return null; }
+  }
+  return {
+    title: annEdits.title,
+    description: annEdits.description,
+    audience, audience_label,
+    notify_mail: $("cf-ann-email")?.checked ? 1 : 0,
+    schedule_at,
+    file_ids: _annAttachments.map((a) => a.fileId),
+  };
+}
+
 function showConfirm(d) {
   const m = $("modal");
   const p = d.preview || {};
@@ -1042,9 +1244,11 @@ function showConfirm(d) {
     html += `<input class="editable-field" id="cf-ann-subj" value="${escapeHtml(subj)}" />`;
     html += `<div style="font-size:12px;color:var(--muted);margin-top:10px">Body</div>`;
     html += `<textarea class="editable-field body" id="cf-ann-body">${escapeHtml(body)}</textarea>`;
+    html += announcementControls(d.settings);
   }
   if (d.action === "publish_assessment") {
-    html += `<p style="color:var(--muted);font-size:13px;margin:12px 0 0">This creates the quiz on mooKIT with the questions from your draft above. Review them before confirming.</p>`;
+    html += `<p style="color:var(--muted);font-size:13px;margin:12px 0 8px">Configure the settings below, then publish. This is exactly what will be created on mooKIT (with the questions from your draft above).</p>`;
+    html += quizSettingsForm(d.settings);
     const diagramSummary = getDiagramAttachSummary();
     if (diagramSummary) html += `<p style="color:var(--accent2);font-size:13px;margin:8px 0 0">${escapeHtml(diagramSummary)}</p>`;
   }
@@ -1060,39 +1264,50 @@ function showConfirm(d) {
   let done = false;
   const finish = (ok) => {
     if (done) return;
-    if (d.action === "send_announcement" && ok) {
+    // Gather + validate any revise body BEFORE closing the modal so a validation error keeps it open.
+    let reviseBody = null;
+    if (ok && d.action === "send_announcement") {
       const title = ($("cf-ann-subj")?.value || "").trim();
       const description = ($("cf-ann-body")?.value || "").trim();
-      if (!title || !description) {
-        toast("Subject and body are required", "warn");
-        return;
-      }
+      if (!title || !description) { toast("Subject and body are required", "warn"); return; }
+      reviseBody = readAnnouncementSettings({ title, description });
+      if (reviseBody === null) return;  // schedule validation failed; keep modal open
+    } else if (ok && d.action === "publish_assessment") {
+      reviseBody = readQuizSettings();
+      if (reviseBody === null) return;  // validation failed; keep modal open
     }
     done = true;
     closeModal(false);
-    if (d.action === "send_announcement" && ok) {
-      const title = ($("cf-ann-subj")?.value || "").trim();
-      const description = ($("cf-ann-body")?.value || "").trim();
-      resolveAction(d, true, { title, description });
-    } else {
-      resolveAction(d, ok);
-    }
+    resolveAction(d, ok, reviseBody);
   };
   openModal(() => finish(false));
   $("btn-reject").onclick = () => finish(false);
   $("btn-confirm").onclick = () => finish(true);
+  // Enable/disable the duration field with the timed checkbox.
+  const timedBox = $("cf-q-timed");
+  if (timedBox) timedBox.addEventListener("change", () => { const dur = $("cf-q-duration"); if (dur) dur.disabled = !timedBox.checked; });
+  // Announcement controls: reset attachments, wire the attach button + schedule toggle.
+  if (d.action === "send_announcement") {
+    _annAttachments = [];
+    renderAnnAttachments();
+    const attachBtn = $("cf-ann-attach");
+    if (attachBtn) attachBtn.onclick = uploadAnnAttachment;
+    const schedBox = $("cf-ann-sched");
+    if (schedBox) schedBox.addEventListener("change", () => { const w = $("cf-ann-when"); if (w) w.disabled = !schedBox.checked; });
+  }
 }
-async function resolveAction(d, confirm, annEdits) {
+async function resolveAction(d, confirm, reviseBody) {
   const verb = confirm ? "confirm" : "reject";
+  const reviseLabel = d.action === "publish_assessment" ? "revise quiz settings" : "revise announcement";
   try {
-    if (confirm && d.action === "send_announcement" && annEdits?.title && annEdits?.description) {
+    if (confirm && reviseBody) {
       const rr = await fetch(`${baseUrl()}/v1/actions/${d.action_id}/revise`, {
         method: "POST",
         headers: headers({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ title: annEdits.title, description: annEdits.description }),
+        body: JSON.stringify(reviseBody),
       });
       const rj = await rr.json().catch(() => ({}));
-      if (!rr.ok) { surfaceError(rr.status, rj.detail, "revise announcement"); return; }
+      if (!rr.ok) { surfaceError(rr.status, rj.detail, reviseLabel); return; }
     }
     const r = await fetch(`${baseUrl()}/v1/actions/${d.action_id}/${verb}`, {
       method:"POST", headers: headers({"Content-Type":"application/json"}),
@@ -1549,14 +1764,24 @@ function persistCfg() {
     uid: $("cfg-uid").value.trim(), token: $("cfg-token").value.trim(), sessionId,
   }));
 }
-function newSession() {
-  sessionId = "sess-" + Math.random().toString(36).slice(2);
+function clearChatUI() {
   log.innerHTML = "";
   uploadedFiles.forEach((f) => f.localBlobUrl && URL.revokeObjectURL(f.localBlobUrl));
   uploadedFiles = []; offeredActionsKey = ""; $("file-list").innerHTML = "";
   draftArtifacts = []; pendingRefs = [];
-  renderRefChips(); renderArtifactsPanel();
-  updateFilesPanelSummary(); persistCfg(); renderEmptyState();
+  renderRefChips(); renderArtifactsPanel(); updateFilesPanelSummary();
+}
+function newSession() {
+  sessionId = "sess-" + Math.random().toString(36).slice(2);
+  clearChatUI(); persistCfg(); renderEmptyState();
+  loadSessionList();
+}
+// Reopen a previous chat: restore its transcript (Redis-hot or Postgres-cold) + per-chat context.
+async function openSession(id) {
+  if (!id || id === sessionId) return;
+  sessionId = id; persistCfg(); clearChatUI();
+  await restoreSession();
+  await loadSessionArtifacts();
 }
 async function restoreSession() {
   try {
@@ -1567,8 +1792,38 @@ async function restoreSession() {
     const msgs = data.messages || [];
     if (!msgs.length) { renderEmptyState(); return; }
     for (const m of msgs) addMsg(m.role === "user" ? "user" : "assistant", m.content || "");
-    addChip("↺ restored " + msgs.length + " message(s) from this session", "");
+    addChip("↺ restored " + msgs.length + " message(s) from this chat", "");
   } catch (_) { renderEmptyState(); }
+}
+// Rebuild the "this chat" context (uploads + drafts) for a reopened session.
+async function loadSessionArtifacts() {
+  try {
+    const r = await fetch(baseUrl() + "/v1/sessions/" + encodeURIComponent(sessionId) + "/artifacts", { headers: headers() });
+    if (!r.ok) return;
+    const st = await r.json();
+    const data = st.data || st;
+    for (const u of (data.uploads || [])) {
+      registerReadyFile({ id: u.id, name: u.title, kind: u.kind || "document", textReady: true, diagramsReady: true, phaseText: "restored" });
+    }
+    for (const d of (data.drafts || [])) {
+      upsertDraftArtifact({ artifact_id: d.id, type: d.type, version: d.version, preview: { title: d.title } });
+    }
+    renderArtifactsPanel();
+  } catch (_) { /* non-fatal */ }
+}
+// Populate the header "Recent chats" picker from the durable history list.
+async function loadSessionList() {
+  const sel = $("session-picker");
+  if (!sel || !$("cfg-token").value.trim()) return;
+  try {
+    const r = await fetch(baseUrl() + "/v1/sessions?limit=50", { headers: headers() });
+    if (!r.ok) return;
+    const st = await r.json();
+    const list = (st.data || st).sessions || [];
+    sel.innerHTML = `<option value="">▾ Recent chats (${list.length})</option>` +
+      list.map((s) => `<option value="${escapeHtml(s.id)}"${s.id === sessionId ? " selected" : ""}>` +
+        `${escapeHtml(s.title || "New chat")} · ${s.messageCount || 0} msg</option>`).join("");
+  } catch (_) { /* non-fatal */ }
 }
 
 (function initConfig() {
@@ -1588,12 +1843,13 @@ async function restoreSession() {
   if (token) $("cfg-token").value = token;
   sessionId = saved.sessionId || ("sess-" + Math.random().toString(36).slice(2));
   ["cfg-base", "cfg-course", "cfg-uid", "cfg-token"].forEach((id) => {
-    $(id).addEventListener("change", () => { persistCfg(); loadMeta(); });
+    $(id).addEventListener("change", () => { persistCfg(); loadMeta(); loadTaxonomy(); });
     $(id).addEventListener("input", persistCfg);
   });
   $("new-session").onclick = newSession;
+  $("session-picker").onchange = (e) => { if (e.target.value) openSession(e.target.value); };
   persistCfg();
-  loadMeta().then(() => restoreSession());
+  loadMeta().then(() => { loadTaxonomy(); loadSessionList(); return restoreSession(); });
 })();
 
 function parseSseFrames(buffer) {
@@ -1662,7 +1918,7 @@ function handleSseFrame(frame, state) {
     surfaceError(0, d.message || d.code || JSON.stringify(d), "assistant");
   } else if (ev === "done") {
     if (state.skeletonEl) { state.skeletonEl.remove(); state.skeletonEl = null; }
-    if (!state.sawDone) { state.sawDone = true; addChip("✓ turn complete", ""); }
+    if (!state.sawDone) { state.sawDone = true; addChip("✓ turn complete", ""); loadSessionList(); }
   }
 }
 

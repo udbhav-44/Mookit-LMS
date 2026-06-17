@@ -326,8 +326,8 @@ gantt
 
 ## Implementation checklist
 
-- [ ] Phase 1: `GET /v1/taxonomy` + UI dropdowns  
-- [ ] Phase 2: `revise_assessment` + quiz confirm modal  
-- [ ] Phase 3: extended `revise_announcement` + attach API + announcement confirm UI  
-- [ ] Phase 4: lecture taxonomy ids + schedule in confirm  
-- [ ] Phase 5: tests + README + manual QA on `test.mookit.in`  
+- [x] Phase 1: `GET /v1/taxonomy` + UI dropdowns  
+- [x] Phase 2: `revise_assessment` + quiz confirm modal  
+- [x] Phase 3: extended `revise_announcement` + attach API + announcement confirm UI  
+- [x] Phase 4: lecture taxonomy ids + schedule in confirm (incl. `POST /v1/lecture/{id}/edit`)  
+- [x] Phase 5: tests + README + automated QA (manual QA on `test.mookit.in` pending tokens)  

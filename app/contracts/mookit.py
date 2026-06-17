@@ -60,3 +60,12 @@ class MooKitClient(ABC):
 
     @abstractmethod
     async def attach_course_resource(self, ctx: RequestContext, entity_type: str, entity_id: int, resources: list[dict]) -> list[Any]: ...
+
+    async def get_allowed_extensions(self, ctx: RequestContext) -> dict:
+        """Return mooKIT's upload allow-list: {entityTypesAndFileFormat, fileMimeTypes}.
+
+        Concrete default goes through `call`; fakes inherit it harmlessly (callers treat it as
+        best-effort). Used to drive the UI file-input `accept=` from the server of record.
+        """
+        data = await self.call(ctx, "GET", "/files/allowed_extensions")
+        return data if isinstance(data, dict) else {}

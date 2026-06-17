@@ -197,16 +197,46 @@ class DeterministicExecutor:
     # ------------------------------------------------------------------
     async def _send_announcement(self, ctx: RequestContext, payload: dict) -> Any:
         body_fields = {k: v for k, v in payload.items() if not k.startswith("_")}
-        intent = payload.get("_audience_intent", "all")
-        section_ids = await self._resolve_audience(ctx, intent)
-        if section_ids is not None:
-            body_fields["sectionIds"] = section_ids
-        # Ensure published.
+        # Audience: a pre-selected section id (from the confirm modal) is re-validated fail-closed;
+        # otherwise resolve the intent label. Either way, the target is derived server-side here,
+        # never trusted from model text.
+        section_id = payload.get("_audience_section_id")
+        if section_id is not None:
+            body_fields["sectionIds"] = await self._resolve_section_id(ctx, int(section_id))
+        else:
+            intent = payload.get("_audience_intent", "all")
+            section_ids = await self._resolve_audience(ctx, intent)
+            if section_ids is not None:
+                body_fields["sectionIds"] = section_ids
+        # Honor the published block from the (possibly revised) payload — this carries the
+        # instructor's schedule. Only default to publish-now when it is missing entirely.
         published = dict(body_fields.get("published") or {})
-        published["status"] = 1
+        if "status" not in published:
+            published["status"] = 1
         body_fields["published"] = published
         body = AnnouncementCreate(**body_fields)
         return await self.mookit.create_announcement(ctx, body)
+
+    async def _resolve_section_id(self, ctx: RequestContext, section_id: int) -> list[int]:
+        """Validate a pre-selected section id against the live section taxonomy (fail-closed).
+
+        Refusing an unknown id is safer than sending to it (or silently broadcasting to all) — a
+        section deleted/renamed between draft and confirm should block the send, not guess.
+        """
+        try:
+            terms = await self.mookit.list_taxonomy(ctx, "section")
+        except Exception as exc:
+            raise ValueError(
+                "Couldn't verify the target section (section lookup failed). This was NOT sent — "
+                "try again, or choose 'all students' explicitly."
+            ) from exc
+        if any(t.id == section_id for t in terms):
+            return [section_id]
+        available = ", ".join(t.name for t in terms) or "(none)"
+        raise ValueError(
+            f"The selected section (id {section_id}) is no longer a course section, so this was "
+            f"NOT sent. Available sections: {available}. Pick a valid section or say 'all students'."
+        )
 
     async def _resolve_audience(self, ctx: RequestContext, intent: str) -> list[int] | None:
         """Resolve an audience intent label to sectionIds. 'all'/empty → None (all students).

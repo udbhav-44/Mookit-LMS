@@ -8,6 +8,7 @@ corresponding ProposedAction.payload fields (no drift) — asserted by tests.
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 from app.contracts import Artifact, PreviewRender
@@ -28,12 +29,50 @@ def sanitize_markdown(text: str | None) -> str:
 
 
 # --- Assessment ----------------------------------------------------------
-def build_assessment_preview(*, title: str, questions: list[dict[str, Any]]) -> PreviewRender:
-    summary = [f"{len(questions)} question(s)"]
+_ASSESSMENT_TYPE_LABEL = {"quizzes": "Quiz", "exams": "Exam", "assignments": "Assignment"}
+
+
+def _fmt_unix(ts: Any) -> str:
+    """Render a unix-second timestamp as a readable UTC line; '—' when unset."""
+    if ts is None:
+        return "—"
+    try:
+        return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    except (ValueError, OSError, TypeError):
+        return "—"
+
+
+def build_assessment_preview(
+    *,
+    title: str,
+    questions: list[dict[str, Any]],
+    assessment: dict[str, Any] | None = None,
+    assessment_type: str | None = None,
+) -> PreviewRender:
+    """Faithful publish preview. When `assessment` (the AssessmentCreate body) is supplied, the
+    settings the instructor configured in the confirm modal (type, dates, timing) are rendered so
+    the card matches the exact payload that will be sent — no hidden defaults."""
+    summary: list[str] = []
+    if assessment_type:
+        summary.append(f"Type: {_ASSESSMENT_TYPE_LABEL.get(assessment_type, assessment_type)}")
+
+    summary.append(f"{len(questions)} question(s)")
     by_type: dict[str, int] = {}
     for q in questions:
         by_type[q["questionType"]] = by_type.get(q["questionType"], 0) + 1
     summary += [f"{n} × {t}" for t, n in sorted(by_type.items())]
+
+    if assessment:
+        summary.append(f"Opens: {_fmt_unix(assessment.get('startDate'))}")
+        summary.append(f"Closes: {_fmt_unix(assessment.get('endDate'))}")
+        summary.append(f"Results: {_fmt_unix(assessment.get('resultsDate'))}")
+        if assessment.get("timed"):
+            dur = assessment.get("duration")
+            summary.append(f"Timed: {dur} min" if dur else "Timed")
+        if assessment.get("retakeAllowed"):
+            summary.append("Retakes allowed")
+        if assessment.get("showCorrectAnswers"):
+            summary.append("Shows correct answers")
 
     warnings: list[str] = []
     for i, q in enumerate(questions):
@@ -55,13 +94,19 @@ def build_announcement_preview(
     channel: str,  # "email" | "lms"
     audience_label: str,  # intent label, e.g. "all students" / "Section 3"
     urgent: bool,
+    schedule_label: str | None = None,  # readable releaseOn when scheduled for later
+    attachment_count: int = 0,
 ) -> PreviewRender:
+    summary = [
+        f"Channel: {'Email + LMS' if channel == 'email' else 'LMS only'}",
+        f"Priority: {'Urgent' if urgent else 'Normal'}",
+        f"When: {schedule_label}" if schedule_label else "When: Send now",
+    ]
+    if attachment_count:
+        summary.append(f"Attachments: {attachment_count}")
     return PreviewRender(
         title=f"Send announcement: {subject}",
-        summary_lines=[
-            f"Channel: {'Email + LMS' if channel == 'email' else 'LMS only'}",
-            f"Priority: {'Urgent' if urgent else 'Normal'}",
-        ],
+        summary_lines=summary,
         audience=audience_label,
         body_markdown=sanitize_markdown(body_markdown),
     )
