@@ -1,10 +1,10 @@
-"""Phase 2 — sandboxed numeric evaluation + answer verification."""
+"""Sandboxed numeric expression evaluation."""
 
 import math
 
 import pytest
 
-from app.gen.quiz.numeric import UnsafeExpression, safe_eval, verify_numeric
+from app.gen.quiz.numeric import UnsafeExpression, safe_eval
 
 
 def test_safe_eval_arithmetic() -> None:
@@ -35,35 +35,3 @@ def test_safe_eval_variables_and_functions() -> None:
 def test_safe_eval_rejects_unsafe(expr: str) -> None:
     with pytest.raises(UnsafeExpression):
         safe_eval(expr)
-
-
-def test_verify_numeric_match() -> None:
-    res = verify_numeric(
-        solution_expr="0.5 * m * v**2",
-        variables={"m": 2.0, "v": 3.0},
-        stated_answer=9.0,
-        expected_unit="J",
-        stated_unit="joules",
-    )
-    assert res.ok and res.matches and res.unit_ok
-    assert res.computed == pytest.approx(9.0)
-
-
-def test_verify_numeric_answer_mismatch() -> None:
-    res = verify_numeric(solution_expr="m * a", variables={"m": 2, "a": 5}, stated_answer=12.0)
-    assert not res.ok and not res.matches
-    assert "mismatch" in res.reason
-
-
-def test_verify_numeric_unit_mismatch() -> None:
-    res = verify_numeric(
-        solution_expr="m * a", variables={"m": 2, "a": 5}, stated_answer=10.0,
-        expected_unit="N", stated_unit="kg",
-    )
-    assert not res.ok and res.matches and not res.unit_ok
-    assert "unit" in res.reason
-
-
-def test_verify_numeric_unsafe_expression_is_not_ok() -> None:
-    res = verify_numeric(solution_expr="os.system('x')", variables={}, stated_answer=0.0)
-    assert not res.ok and res.computed is None

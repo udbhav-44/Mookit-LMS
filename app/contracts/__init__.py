@@ -4,7 +4,15 @@ from .llm import LLMEvent, LLMProvider
 from .mookit import MooKitClient
 from .preview import PreviewRender
 from .stores import Artifact, ArtifactRegistry, Message, SessionStore
-from .tools import ProposedAction, RiskTier, Tool, ToolResult
+from .tools import (
+    ClarificationOption,
+    ClarificationQuestion,
+    ClarificationRequest,
+    ProposedAction,
+    RiskTier,
+    Tool,
+    ToolResult,
+)
 
 __all__ = [
     "RequestContext",
@@ -12,6 +20,9 @@ __all__ = [
     "Tool",
     "ToolResult",
     "ProposedAction",
+    "ClarificationRequest",
+    "ClarificationQuestion",
+    "ClarificationOption",
     "RiskTier",
     "PreviewRender",
     "SessionStore",

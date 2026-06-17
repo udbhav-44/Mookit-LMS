@@ -22,7 +22,9 @@ import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
-from sqlalchemy import insert
+from fastapi.responses import FileResponse
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import insert, select
 
 from ..auth.permissions import require_permission
 from ..config import settings
@@ -190,6 +192,7 @@ async def file_status(
     """Poll extraction progress.  Returns the FileMeta status, ARQ job progress, and
     diagram extraction results (available after the background job completes phase 2)."""
     from sqlalchemy import select
+
     from ..diagrams.pipeline import get_diagram_result
     async with request.app.state.session_factory() as session:
         result = await session.execute(
@@ -214,7 +217,8 @@ async def file_status(
 
     chunk_count: int | None = None
     if meta.extraction_status == "indexed":
-        from sqlalchemy import func, select as sa_select
+        from sqlalchemy import func
+        from sqlalchemy import select as sa_select
         async with request.app.state.session_factory() as session:
             chunk_count = (
                 await session.execute(
@@ -242,6 +246,115 @@ async def file_status(
         "ready": meta.extraction_status in ("indexed", "stored"),
         "diagrams": diagram_result.model_dump() if diagram_result else None,
     }
+
+
+@router.get("/files/{file_id}/diagrams/{diagram_file}")
+async def get_diagram_image(
+    file_id: str,
+    diagram_file: str,
+    request: Request,
+    ctx: RequestContext = Depends(get_request_context),
+):
+    """Serve a cropped diagram PNG for UI preview (tenant-scoped, read-only)."""
+    from sqlalchemy import select
+
+    from ..diagrams.pipeline import get_diagram_result
+
+    safe_name = Path(diagram_file).name
+    if safe_name != diagram_file or ".." in diagram_file or "/" in diagram_file or "\\" in diagram_file:
+        raise HTTPException(status_code=400, detail="Invalid diagram filename.")
+
+    async with request.app.state.session_factory() as session:
+        result = await session.execute(
+            select(FileMeta).where(
+                FileMeta.id == file_id,
+                FileMeta.tenant_key == ctx.tenant_key,
+            )
+        )
+        meta = result.scalar_one_or_none()
+    if meta is None:
+        raise HTTPException(status_code=404, detail="File not found.")
+
+    diagram_result = await get_diagram_result(
+        request.app.state.redis, ctx.tenant_key, file_id
+    )
+    if diagram_result is None:
+        raise HTTPException(status_code=404, detail="Diagram extraction not complete.")
+
+    match = next(
+        (d for d in diagram_result.diagrams if d.diagram_file == safe_name),
+        None,
+    )
+    if match is None:
+        raise HTTPException(status_code=404, detail="Diagram not found.")
+
+    path = Path(match.diagram_path)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Diagram file missing on disk.")
+
+    return FileResponse(path, media_type="image/png", filename=safe_name)
+
+
+@router.delete("/files/{file_id}")
+async def delete_file(
+    file_id: str,
+    request: Request,
+    ctx: RequestContext = Depends(get_request_context),
+):
+    """Delete an uploaded file and its derived data (tenant-scoped, owner-or-permission gated).
+
+    Removes the FileMeta row, RAG chunks, and the on-disk blob. Best-effort cleanup of the
+    artifact-registry manifest entry. mooKIT is never touched — uploads live only in this service.
+    """
+    require_permission(ctx, "files", "upload")
+
+    async with request.app.state.session_factory() as session:
+        meta = (
+            await session.execute(
+                select(FileMeta).where(
+                    FileMeta.id == file_id,
+                    FileMeta.tenant_key == ctx.tenant_key,
+                )
+            )
+        ).scalar_one_or_none()
+        if meta is None:
+            raise HTTPException(status_code=404, detail="File not found.")
+
+        # Remove RAG chunks (vectors) then the file row, in one transaction.
+        await session.execute(
+            sa_delete(DocChunk).where(
+                DocChunk.tenant_key == ctx.tenant_key,
+                DocChunk.doc_id == file_id,
+            )
+        )
+        await session.execute(
+            sa_delete(FileMeta).where(
+                FileMeta.id == file_id,
+                FileMeta.tenant_key == ctx.tenant_key,
+            )
+        )
+        await session.commit()
+
+    # Best-effort: remove the on-disk blob.
+    try:
+        Path(meta.storage_path).unlink(missing_ok=True)
+    except Exception as exc:  # noqa: BLE001 — non-fatal
+        logger.warning("Could not delete blob for file %s: %s", file_id, exc)
+
+    # Best-effort: drop the manifest artifact so the model can't reference a deleted file.
+    registry = getattr(request.app.state, "artifact_registry", None)
+    remover = getattr(registry, "delete", None) or getattr(registry, "remove", None)
+    if remover is not None:
+        try:
+            await remover(ctx, file_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not remove artifact for file %s: %s", file_id, exc)
+
+    audit = getattr(request.app.state, "audit_logger", None)
+    if audit:
+        await audit.log(ctx, action="file_delete", tool="delete_file", status="success")
+
+    return {"success": True, "fileId": file_id, "deleted": True}
 
 
 # ---------------------------------------------------------------------------

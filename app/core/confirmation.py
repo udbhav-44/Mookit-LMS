@@ -114,6 +114,61 @@ class ConfirmationGate:
 
         return True, action
 
+    async def revise_announcement(
+        self,
+        action_id: str,
+        tenant_key: str,
+        *,
+        title: str,
+        description: str,
+    ) -> PendingAction | None:
+        """Update a pending send_announcement payload + preview after instructor edits in the UI.
+
+        Recomputes content_hash from the revised payload so confirm still verifies integrity.
+        """
+        from app.preview.render import build_announcement_preview, sanitize_markdown
+
+        async with self.session_factory() as session:
+            stmt = select(PendingAction).where(
+                PendingAction.id == action_id,
+                PendingAction.tenant_key == tenant_key,
+                PendingAction.status == "pending",
+                PendingAction.action == "send_announcement",
+            )
+            result = await session.execute(stmt)
+            action = result.scalar_one_or_none()
+            if action is None:
+                return None
+
+            payload = dict(action.payload)
+            payload["title"] = title.strip()
+            payload["description"] = sanitize_markdown(description)
+            audience = payload.get("_audience_intent", "all")
+            notify_mail = bool(payload.get("notifyMail"))
+            urgent = payload.get("type") == "urgent"
+            preview = build_announcement_preview(
+                subject=payload["title"],
+                body_markdown=description,
+                channel="email" if notify_mail else "lms",
+                audience_label=audience,
+                urgent=urgent,
+            )
+            server_hash = _canonical_hash(payload)
+            await session.execute(
+                update(PendingAction)
+                .where(PendingAction.id == action_id)
+                .values(
+                    payload=payload,
+                    content_hash=server_hash,
+                    preview_json=preview.model_dump(),
+                )
+            )
+            await session.commit()
+            action.payload = payload
+            action.content_hash = server_hash
+            action.preview_json = preview.model_dump()
+            return action
+
     # ------------------------------------------------------------------
     # Called after successful execution or explicit rejection
     # ------------------------------------------------------------------

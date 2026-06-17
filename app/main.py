@@ -35,7 +35,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from .api import chat, confirm, files, health, meta, quiz, sessions
+from .api import announcement, chat, confirm, files, health, meta, quiz, sessions
 from .audit.logger import AuditLogger
 from .config import settings
 from .mookit.client import MooKitClient
@@ -192,6 +192,7 @@ async def lifespan(app: FastAPI):
             rag_store=app.state.rag_store,
             session_factory=app.state.session_factory,
             openai_client=app.state.openai_client,
+            redis=app.state.redis,
         )
         logger.info("Orchestrator (AI brain) wired.")
     except Exception as exc:
@@ -259,6 +260,7 @@ app.include_router(chat.router,     prefix="/v1",          tags=["chat"])
 app.include_router(sessions.router, prefix="/v1/sessions", tags=["sessions"])
 app.include_router(files.router,    prefix="/v1",          tags=["files"])
 app.include_router(quiz.router,     prefix="/v1",          tags=["quiz"])
+app.include_router(announcement.router, prefix="/v1",    tags=["announcement"])
 app.include_router(confirm.router,  prefix="/v1",          tags=["confirm"])
 app.include_router(meta.router,     prefix="/v1",          tags=["meta"])
 

@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
 
 import pymupdf
 from PIL import Image
@@ -56,7 +55,7 @@ def _write_api_image(full_path: Path, api_path: Path) -> None:
         img.resize(new_size, Image.LANCZOS).save(api_path)
 
 
-def render_pdf_pages(pdf_path: Path, pages_dir: Path, dpi: int = 300) -> List[RenderedPage]:
+def render_pdf_pages(pdf_path: Path, pages_dir: Path, dpi: int = 300) -> list[RenderedPage]:
     """Render every page of `pdf_path` into `pages_dir` and return metadata."""
     pages_dir.mkdir(parents=True, exist_ok=True)
     api_dir = pages_dir / "api"
@@ -64,7 +63,7 @@ def render_pdf_pages(pdf_path: Path, pages_dir: Path, dpi: int = 300) -> List[Re
 
     doc = pymupdf.open(str(pdf_path))
     logger.info("Rendering %d pages from %s", doc.page_count, pdf_path.name)
-    rendered: List[RenderedPage] = []
+    rendered: list[RenderedPage] = []
 
     for idx in range(doc.page_count):
         page_num = idx + 1

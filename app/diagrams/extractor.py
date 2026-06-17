@@ -11,11 +11,10 @@ import base64
 import json
 import logging
 from pathlib import Path
-from typing import List, Optional
 
 from openai import AsyncOpenAI
 
-from .models import BBox, DiagramInfo
+from .models import BBox
 from .pdf_renderer import RenderedPage
 
 logger = logging.getLogger(__name__)
@@ -57,20 +56,20 @@ def _encode_image(path: Path) -> str:
 class _PageQuestionRaw:
     """Temporary holder parsed from the raw model JSON for one question."""
     def __init__(self, data: dict) -> None:
-        self.question_number: Optional[str] = data.get("question_number")
+        self.question_number: str | None = data.get("question_number")
         self.question_text: str = str(data.get("question_text", ""))
         self.has_diagram: bool = bool(data.get("has_diagram", False))
-        self.diagram_description: Optional[str] = data.get("diagram_description")
-        self.choices: List[str] = data.get("choices") or []
+        self.diagram_description: str | None = data.get("diagram_description")
+        self.choices: list[str] = data.get("choices") or []
         self.confidence: float = float(data.get("confidence", 0.5))
         # bbox
         raw_dbbox = data.get("diagram_bbox")
-        self.diagram_bbox: Optional[BBox] = _parse_bbox(raw_dbbox)
+        self.diagram_bbox: BBox | None = _parse_bbox(raw_dbbox)
         raw_qbbox = data.get("question_bbox")
-        self.question_bbox: Optional[BBox] = _parse_bbox(raw_qbbox)
+        self.question_bbox: BBox | None = _parse_bbox(raw_qbbox)
 
 
-def _parse_bbox(raw: object) -> Optional[BBox]:
+def _parse_bbox(raw: object) -> BBox | None:
     if not isinstance(raw, dict):
         return None
     try:
@@ -87,7 +86,7 @@ class OpenAIDiagramExtractor:
         self.client = AsyncOpenAI(api_key=api_key)
         self.model = model
 
-    async def extract_page(self, page: RenderedPage) -> List[_PageQuestionRaw]:
+    async def extract_page(self, page: RenderedPage) -> list[_PageQuestionRaw]:
         """Return raw question records (with bbox info) for one page."""
         if not page.has_text and not page.has_graphics:
             return []
@@ -157,7 +156,7 @@ class OpenAIDiagramExtractor:
 
         return parsed
 
-    async def _locate_diagram(self, page: RenderedPage, q: _PageQuestionRaw) -> Optional[BBox]:
+    async def _locate_diagram(self, page: RenderedPage, q: _PageQuestionRaw) -> BBox | None:
         desc = q.diagram_description or "diagram or figure"
         try:
             resp = await self.client.chat.completions.create(

@@ -11,17 +11,16 @@ attach cropped diagram images to the questions it creates in mooKIT.
 """
 from __future__ import annotations
 
-import json
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
 
 import redis.asyncio as aioredis
 from PIL import Image
 
 from .extractor import OpenAIDiagramExtractor
 from .models import BBox, DiagramExtractionResult, DiagramInfo
-from .pdf_renderer import RenderedPage, render_pdf_pages
+from .pdf_renderer import render_pdf_pages
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +60,7 @@ async def run_diagram_pipeline(
     openai_api_key: str,
     openai_model: str,
     redis: aioredis.Redis,
-    progress_cb: Optional[Callable[[int, str], None]] = None,
+    progress_cb: Callable[[int, str], None] | None = None,
 ) -> DiagramExtractionResult:
     """Run the full diagram extraction pipeline for one uploaded PDF.
 
@@ -165,7 +164,7 @@ async def run_diagram_pipeline(
 
 async def get_diagram_result(
     redis: aioredis.Redis, tenant_key: str, file_id: str
-) -> Optional[DiagramExtractionResult]:
+) -> DiagramExtractionResult | None:
     """Retrieve a previously stored DiagramExtractionResult from Redis."""
     raw = await redis.get(_diagrams_key(tenant_key, file_id))
     if not raw:

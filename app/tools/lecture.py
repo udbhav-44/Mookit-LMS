@@ -103,6 +103,17 @@ class PublishLectureTool(Tool):
         if draft is None:
             raise KeyError(parsed.draft_id)
         d = draft.payload
+        # Guard: never propose a lecture whose week never resolved to a mooKIT taxonomy id.
+        # mooKIT requires an integer weekId; a None here would fail LectureCreate validation
+        # (or be rejected by mooKIT) at confirm time. Surface a clear error so the instructor
+        # re-resolves the week instead of hitting an opaque write failure after confirming.
+        if d.get("week_id") is None:
+            label = d.get("week_label", "")
+            named = f' "{label}"' if label else ""
+            raise ValueError(
+                f"Can't publish this lecture: the week{named} wasn't matched to a course week. "
+                'Ask which week to use (e.g. "Week 4"), then re-draft.'
+            )
         scheduled = d.get("release_on") is not None
         visibility = "scheduled" if scheduled else "published"
         schedule_label = _fmt_schedule(d.get("release_on"))

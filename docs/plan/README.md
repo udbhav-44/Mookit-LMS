@@ -30,6 +30,12 @@ announcements, and publish lectures — all with human-in-the-loop confirmation.
 | [06-work-division.md](06-work-division.md) | One-page ownership map + handoffs |
 | [07-timeline-and-checkpoints.md](07-timeline-and-checkpoints.md) | Parallel phases + integration checkpoints (CP1–CP6) |
 
+**Next phase (approved):**
+| File | Contents |
+|---|---|
+| [product-ui-and-durable-history.md](product-ui-and-durable-history.md) | **Full-product instructor UI at `/app`** (Preact+htm, no build, three-pane) + **durable chat history** backend (sessions/messages persistence, list endpoint, per-session uploads/drafts). Demo `/ui` untouched. Quiz UX depth deferred to a separate discussion. |
+| [11-instructor-ux-de-hardcode.md](11-instructor-ux-de-hardcode.md) | **Remove hardcoded mooKIT defaults** — live taxonomy in UI, quiz settings in publish confirm modal, announcement audience/email/schedule/attachments. Create-only scope. |
+
 **Context & reference:**
 | # | File | Contents |
 |---|---|---|

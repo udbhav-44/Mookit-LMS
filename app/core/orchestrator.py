@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from app.config import Settings, get_settings
 from app.contracts import (
     ArtifactRegistry,
+    ClarificationRequest,
     LLMProvider,
     MooKitClient,
     ProposedAction,
@@ -37,6 +38,7 @@ from app.core.guardrails import screen_input, screen_tool_output
 from app.core.memory import TranscriptManager
 from app.core.prompts import SYSTEM_PROMPT, build_input
 from app.core.prompts.assembly import prompt_cache_key
+from app.core.prompts.spotlight import new_delimiter, spotlight
 from app.core.reference_resolver import ReferenceResolver
 from app.preview.render import preview_from_artifact
 from app.tools.registry import ToolRegistry, UnknownToolError
@@ -57,6 +59,7 @@ class OrchestratorEvent(BaseModel):
         "tool_progress",
         "artifact_updated",
         "pending_confirmation",
+        "clarification",
         "error",
         "done",
     ]
@@ -101,12 +104,14 @@ class Orchestrator:
     # ------------------------------------------------------------------
     # SSE adapter consumed by app/api/chat.py
     # ------------------------------------------------------------------
-    async def stream(self, ctx: RequestContext, user_text: str) -> AsyncIterator[dict[str, str]]:
-        async for ev in self.run_turn(ctx, user_text):
+    async def stream(
+        self, ctx: RequestContext, user_text: str, *, references: list[str] | None = None
+    ) -> AsyncIterator[dict[str, str]]:
+        async for ev in self.run_turn(ctx, user_text, references=references):
             yield {"event": ev.event, "data": json.dumps(ev.data)}
 
     async def run_turn(
-        self, ctx: RequestContext, user_text: str
+        self, ctx: RequestContext, user_text: str, *, references: list[str] | None = None
     ) -> AsyncIterator[OrchestratorEvent]:
         # Guardrail screen on the user input. A blocking hook (e.g. moderation) stops the turn;
         # flags-only results are advisory (the confirmation gate remains the real backstop).
@@ -128,9 +133,13 @@ class Orchestrator:
         cache_key = prompt_cache_key(tenant_key=ctx.tenant_key, model=self._settings.openai.model)
 
         manifest = await self._resolver.manifest(ctx)
+        references_block = await self._build_references_block(ctx, references)
         transcript = await self._transcript.view(ctx)
         input_items: list[dict[str, Any]] = build_input(
-            manifest=manifest, transcript=transcript, user_turn=user_text
+            manifest=manifest,
+            references_block=references_block,
+            transcript=transcript,
+            user_turn=user_text,
         )
 
         previous_response_id: str | None = None
@@ -191,14 +200,26 @@ class Orchestrator:
 
             input_items = []
             proposed = False
+            clarification: ClarificationRequest | None = None
             for call in pending_tool_calls:
                 outcome = await self._dispatch(ctx, call)
                 for emitted in outcome.events:
                     yield emitted
                 if outcome.proposed:
                     proposed = True
+                if outcome.clarification is not None:
+                    clarification = outcome.clarification
                 if outcome.function_output is not None:
                     input_items.append(outcome.function_output)
+
+            if clarification is not None:
+                # Persist the lead-in prose + the questions so the next user turn (the answer)
+                # continues with full context — this is also how prior answers are "remembered"
+                # for the rest of the conversation.
+                note = _clarification_transcript_note("".join(round_text), clarification)
+                await self._sessions.append_message(ctx, "assistant", note)
+                yield OrchestratorEvent(event="done", data={"response_id": response_id or ""})
+                return
 
             if proposed:
                 yield OrchestratorEvent(event="done", data={"response_id": response_id or ""})
@@ -208,6 +229,55 @@ class Orchestrator:
             event="error",
             data={"code": "max_rounds", "message": "tool loop exceeded bound", "retryable": False},
         )
+
+    async def _build_references_block(
+        self, ctx: RequestContext, references: list[str] | None
+    ) -> str | None:
+        """Resolve UI-tagged artifact IDs into an authoritative, content-bearing prompt block.
+
+        Unlike the recency-based manifest, this is driven by explicit instructor intent: the items
+        listed here are the referents for this turn. Draft payloads are injected verbatim (spotlighted
+        as untrusted data); uploaded files contribute their id + filename so downstream tools use the
+        right `doc_artifact_id` without dumping raw bytes into the prompt. Unknown / foreign-tenant ids
+        are silently skipped (fail-closed) since `get` is tenant-scoped.
+        """
+        if not references:
+            return None
+
+        seen: set[str] = set()
+        sections: list[str] = []
+        for ref_id in references:
+            if not ref_id or ref_id in seen:
+                continue
+            seen.add(ref_id)
+            art = await self._artifacts.get(ctx, ref_id)
+            if art is None:
+                continue
+            # Keep the focus stack consistent with what the instructor explicitly pointed at.
+            await self._artifacts.push_focus(ctx, art.id)
+            header = f'- {art.id} · "{art.title}" · {art.type} · {art.status} · v{art.version}'
+            if art.type == "uploaded_file":
+                filename = art.payload.get("filename", art.title)
+                sections.append(
+                    f"{header}\n  Use this file as a source (doc_artifact_id={art.id}, filename={filename})."
+                )
+            else:
+                delimiter = new_delimiter()
+                body = spotlight(
+                    json.dumps(art.payload, ensure_ascii=False),
+                    kind="DRAFT",
+                    delimiter=delimiter,
+                )
+                sections.append(f"{header}\n{body}")
+
+        if not sections:
+            return None
+
+        intro = (
+            "USER EXPLICITLY TAGGED THESE ARTIFACTS — treat them as the referents for this turn "
+            "(do not ask which one the user means):"
+        )
+        return intro + "\n" + "\n".join(sections)
 
     async def _dispatch(self, ctx: RequestContext, call: dict[str, Any]) -> _Dispatch:
         call_id = call.get("call_id", "")
@@ -244,6 +314,22 @@ class Orchestrator:
                 ],
                 function_output=_fn_output(call_id, {"ok": False, "error": str(exc)}),
                 proposed=False,
+            )
+
+        if isinstance(result, ClarificationRequest):
+            # ask_user tier: NEVER fed back to the model. Surface as a clarification event and
+            # end the turn; the instructor's selection arrives as the next user message.
+            events.append(
+                OrchestratorEvent(
+                    event="clarification",
+                    data={
+                        "preamble": result.preamble,
+                        "questions": [q.model_dump() for q in result.questions],
+                    },
+                )
+            )
+            return _Dispatch(
+                events=events, function_output=None, proposed=False, clarification=result
             )
 
         if isinstance(result, ProposedAction):
@@ -299,10 +385,34 @@ class _Dispatch:
         events: list[OrchestratorEvent],
         function_output: dict[str, Any] | None,
         proposed: bool,
+        clarification: ClarificationRequest | None = None,
     ) -> None:
         self.events = events
         self.function_output = function_output
         self.proposed = proposed
+        self.clarification = clarification
+
+
+def _clarification_transcript_note(lead_in: str, clarification: ClarificationRequest) -> str:
+    """Render the asked questions as an assistant transcript message.
+
+    Persisting this keeps the conversation coherent: the instructor's next message (their
+    answer) is interpreted against the questions, and the model won't re-ask the same thing
+    later in the session.
+    """
+    parts: list[str] = []
+    if lead_in.strip():
+        parts.append(lead_in.strip())
+    if clarification.preamble:
+        parts.append(clarification.preamble)
+    for q in clarification.questions:
+        opts = ", ".join(o.label for o in q.options)
+        line = f"- {q.prompt}"
+        if opts:
+            line += f" (options: {opts})"
+        parts.append(line)
+    parts.append("(Awaiting the instructor's selection to continue.)")
+    return "\n".join(parts)
 
 
 def _tool_result_payload(result: ToolResult) -> dict[str, Any]:

@@ -38,6 +38,10 @@ async def get_meta(
     return {
         "instanceId": ctx.instance_id,
         "tenantKey": ctx.tenant_key,
+        "courseId": ctx.course_id,
+        "userId": ctx.user_id,
+        "permissionsOk": bool(ctx.permissions.resources),
+        "permissions": ctx.permissions.resources if ctx.permissions.resources else None,
         "limits": {
             "maxFileSizeBytes": instance_config.get(
                 "max_file_size_bytes", settings.limits.max_file_size_bytes
@@ -52,5 +56,12 @@ async def get_meta(
                 "rate_limit_rpm", settings.limits.rate_limit_rpm
             ),
         },
-        "allowedFileTypes": [".pdf", ".docx", ".pptx", ".xlsx", ".csv", ".txt"],
+        "allowedFileTypes": [
+            ".pdf", ".docx", ".pptx", ".xlsx", ".csv", ".txt",
+            ".mp4", ".mov", ".webm", ".mkv", ".m4v",
+        ],
+        "quizFeatures": {
+            "blueprintEnabled": settings.quiz_blueprint_enabled,
+            "visionEnabled": settings.quiz_vision_enabled,
+        },
     }

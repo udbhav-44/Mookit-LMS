@@ -18,6 +18,7 @@ SSE event schema (Contract 6):
   tool_progress        {"tool": "...", "pct": 40, "message": "..."}
   artifact_updated     {"artifact_id": "...", "type": "...", "version": 2}
   pending_confirmation {"action_id": "...", "preview": {...}, "expires_at": "..."}
+  clarification        {"preamble": "...", "questions": [{"id","prompt","options","allow_multiple","allow_free_text"}]}
   error                {"code": "...", "message": "...", "retryable": bool}
   done                 {"response_id": "..."}
 """
@@ -46,6 +47,7 @@ class ChatRequest(BaseModel):
     message: str
     sessionId: str | None = None
     instanceId: str | None = None
+    references: list[str] = []  # explicit artifact IDs tagged via @ in the UI
 
 
 @router.post("/chat")
@@ -78,7 +80,7 @@ async def chat_endpoint(
             if orchestrator is not None:
                 # Dev B provides app.state.orchestrator as an async generator that
                 # yields SSE event dicts {"event": "...", "data": "..."}.
-                async for event in orchestrator.stream(ctx, body.message):
+                async for event in orchestrator.stream(ctx, body.message, references=body.references):
                     if await request.is_disconnected():
                         logger.info("Client disconnected mid-stream: %s", ctx.request_id)
                         return

@@ -26,7 +26,13 @@ sudo docker rm -f \
   2>/dev/null || true
 
 sudo "${COMPOSE[@]}" down --remove-orphans 2>/dev/null || true
-sudo "${COMPOSE[@]}" up -d --build "$@"
+
+if ! sudo "${COMPOSE[@]}" up -d --build "$@"; then
+  # Corrupted BuildKit layer cache can fail with "parent snapshot ... does not exist".
+  echo "Build failed — pruning stale Docker builder cache and retrying once..." >&2
+  sudo docker builder prune -af >/dev/null 2>&1 || true
+  sudo "${COMPOSE[@]}" up -d --build "$@"
+fi
 
 HOST_IP="$(hostname -I | awk '{print $1}')"
 echo ""

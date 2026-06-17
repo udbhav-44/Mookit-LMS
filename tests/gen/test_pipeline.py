@@ -86,12 +86,12 @@ async def test_no_evidence_yields_no_questions(ctx: RequestContext) -> None:
     assert "no_source_evidence" in draft.payload["warnings"]
 
 
-async def test_higher_order_flagged_for_review(ctx: RequestContext) -> None:
+async def test_higher_order_warns_for_review(ctx: RequestContext) -> None:
     reg = InMemoryArtifactRegistry()
     params = QuizParams(bloom_level="analyze", count=1, type_mix={"mcq_single": 1})
     draft = await _pipeline().build_draft(ctx, reg, doc_artifact_id="doc-1", title="Q", params=params)
     q = draft.payload["questions"][0]
-    assert "higher_order_review" in q["flags"]
+    assert q["bloom_level"] == "analyze"
     assert any("higher-order" in w for w in draft.payload["warnings"])
 
 

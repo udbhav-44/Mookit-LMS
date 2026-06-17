@@ -1,17 +1,9 @@
-"""Phase 2 — deterministic numeric verification for quantitative engineering items.
-
-Engineering quizzes need numeric answers that are actually *correct*, and LLMs make arithmetic
-mistakes. So for a quantitative item the generator emits a solution as a checkable expression plus the
-input values; we recompute it here and confirm the stated answer matches within tolerance. The answer
-is grounded in the source's formulas/values — not trusted from the model's mental arithmetic.
+"""Sandboxed numeric expression evaluation.
 
 Evaluation is a sandboxed AST walk (no ``eval``/``exec``, no new dependency): only numeric literals,
-the named input variables, parentheses, the arithmetic operators (+ - * / // % **, unary ±), and a
-small whitelist of math functions/constants are allowed. Anything else raises ``UnsafeExpression`` —
+named input variables, parentheses, the arithmetic operators (+ - * / // % **, unary ±), and a small
+whitelist of math functions/constants are allowed. Anything else raises ``UnsafeExpression`` —
 attribute access, calls to non-whitelisted names, comprehensions, etc. are all rejected.
-
-Unit checking is a light normalized string compare (not full dimensional analysis); a mismatch is
-reported but never silently ignored.
 """
 
 from __future__ import annotations
@@ -20,8 +12,6 @@ import ast
 import math
 import operator
 from collections.abc import Callable
-
-from pydantic import BaseModel
 
 
 class UnsafeExpression(ValueError):
@@ -93,63 +83,3 @@ def _eval(node: ast.AST, env: dict[str, float]) -> float:
         args = [_eval(a, env) for a in node.args]
         return float(_FUNCS[node.func.id](*args))
     raise UnsafeExpression(f"disallowed expression: {type(node).__name__}")
-
-
-# ---------------------------------------------------------------------------
-# Verification
-# ---------------------------------------------------------------------------
-
-
-class NumericResult(BaseModel):
-    ok: bool                  # True iff computed value matches the stated answer within tolerance
-    computed: float | None    # recomputed value (None if the expression could not be evaluated)
-    matches: bool             # value match (ignoring units)
-    unit_ok: bool             # stated unit matches expected unit (after normalization)
-    reason: str               # human-readable explanation for flags/review
-
-
-def _normalize_unit(u: str | None) -> str:
-    if not u:
-        return ""
-    s = u.strip().lower().replace("·", " ").replace("*", " ")
-    aliases = {
-        "metres": "m", "meter": "m", "meters": "m", "metre": "m",
-        "seconds": "s", "second": "s", "sec": "s",
-        "newtons": "n", "newton": "n",
-        "kilograms": "kg", "kilogram": "kg",
-        "pascals": "pa", "pascal": "pa",
-        "joules": "j", "joule": "j",
-    }
-    return " ".join(aliases.get(tok, tok) for tok in s.split())
-
-
-def verify_numeric(
-    *,
-    solution_expr: str,
-    variables: dict[str, float],
-    stated_answer: float,
-    rel_tol: float = 1e-3,
-    abs_tol: float = 1e-9,
-    expected_unit: str | None = None,
-    stated_unit: str | None = None,
-) -> NumericResult:
-    """Recompute ``solution_expr`` from ``variables`` and check it equals ``stated_answer``.
-
-    Returns ``ok=True`` only when both the value matches within tolerance AND the units agree.
-    """
-    try:
-        computed = safe_eval(solution_expr, variables)
-    except UnsafeExpression as exc:
-        return NumericResult(
-            ok=False, computed=None, matches=False, unit_ok=False,
-            reason=f"unsafe/unevaluable solution expression: {exc}",
-        )
-    matches = math.isclose(computed, stated_answer, rel_tol=rel_tol, abs_tol=abs_tol)
-    unit_ok = _normalize_unit(expected_unit) == _normalize_unit(stated_unit)
-    if matches and unit_ok:
-        reason = "verified"
-    elif not matches:
-        reason = f"answer mismatch: computed {computed:g} but key states {stated_answer:g}"
-    else:
-        reason = f"unit mismatch: expected '{expected_unit}', key states '{stated_unit}'"
-    return NumericResult(ok=matches and unit_ok, computed=computed, matches=matches, unit_ok=unit_ok, reason=reason)

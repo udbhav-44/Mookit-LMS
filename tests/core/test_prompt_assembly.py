@@ -28,6 +28,34 @@ def test_build_input_no_manifest() -> None:
     assert items == [{"role": "user", "content": "hello"}]
 
 
+def test_build_input_references_block_after_manifest_before_transcript() -> None:
+    transcript = [Message(role="user", content="hi")]
+    items = build_input(
+        manifest="- art_1: Quiz",
+        references_block="USER EXPLICITLY TAGGED THESE ARTIFACTS:\n- art_1",
+        transcript=transcript,
+        user_turn="grade it",
+    )
+    roles = [i["role"] for i in items]
+    assert roles[0] == "developer"  # manifest
+    assert "CURRENT ARTIFACTS" in items[0]["content"]
+    assert roles[1] == "developer"  # references block right after manifest
+    assert "EXPLICITLY TAGGED" in items[1]["content"]
+    assert items[2] == {"role": "user", "content": "hi"}  # transcript follows
+    assert items[-1] == {"role": "user", "content": "grade it"}  # user turn last
+
+
+def test_build_input_references_block_without_manifest() -> None:
+    items = build_input(
+        manifest=None,
+        references_block="tagged: art_1",
+        transcript=[],
+        user_turn="hello",
+    )
+    assert items[0] == {"role": "developer", "content": "tagged: art_1"}
+    assert items[-1] == {"role": "user", "content": "hello"}
+
+
 def test_prompt_cache_key_includes_tenant_and_version() -> None:
     key = prompt_cache_key(tenant_key="inst:course", model="gpt-4o")
     assert key.startswith("inst:course:gpt-4o:v")

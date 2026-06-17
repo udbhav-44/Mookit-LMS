@@ -39,8 +39,6 @@ def build_assessment_preview(*, title: str, questions: list[dict[str, Any]]) -> 
     for i, q in enumerate(questions):
         if q.get("bloom_level") in {"analyze", "evaluate", "create"}:
             warnings.append(f"Q{i + 1} is higher-order Bloom ({q['bloom_level']}) — review carefully")
-        if q.get("flags"):
-            warnings.append(f"Q{i + 1} flagged: {', '.join(q['flags'])}")
 
     return PreviewRender(
         title=f"Publish assessment: {title}",

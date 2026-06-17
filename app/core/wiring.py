@@ -20,9 +20,10 @@ from app.gen.announcement_generator import OpenAIAnnouncementGenerator
 from app.gen.quiz.blueprint import LLMComprehender, VisionComprehender
 from app.gen.quiz.generator import OpenAIQuestionGenerator
 from app.gen.quiz.pipeline import QuizPipeline
-from app.gen.quiz.solve_verify import LLMSolveCritique
+from app.gen.quiz.replicate import OpenAIQuestionPaperReplicator
 from app.llm.openai import OpenAIProvider
 from app.tools.announcement import DraftAnnouncementTool, SendAnnouncementTool
+from app.tools.ask_user import AskUserTool
 from app.tools.assessment import CreateQuizTool, EditQuizTool, PublishAssessmentTool
 from app.tools.common import PermissionIntrospectTool, ResolveTaxonomyTool, WhoAmITool
 from app.tools.echo import EchoTool
@@ -39,6 +40,7 @@ def build_orchestrator(
     rag_store,
     session_factory,
     openai_client=None,
+    redis=None,
 ) -> Orchestrator:
     client = openai_client or AsyncOpenAI(api_key=settings.openai.api_key.get_secret_value())
     provider = OpenAIProvider(client, default_model=settings.openai.model)
@@ -47,18 +49,27 @@ def build_orchestrator(
     generator = OpenAIQuestionGenerator(provider, temperature=settings.openai.quiz_temperature)
     announcement_generator = OpenAIAnnouncementGenerator(fast_provider, temperature=0.7)
 
+    # Verbatim question-paper replication: render source pages and transcribe existing questions.
+    # Independent of the blueprint/vision flags so "replicate this paper" works whenever a source
+    # PDF is available.
+    fetch_source = _make_fetch_source(session_factory)
+
+    def render_pages(data: bytes) -> list[bytes]:
+        return render_pdf_to_images(data, max_pages=settings.limits.vision_max_pages)
+
+    replicator = OpenAIQuestionPaperReplicator(client, model=settings.openai.model)
+    # Cropped diagrams extracted at upload are linked to verbatim questions for preview/publish.
+    fetch_diagrams = _make_fetch_diagrams(redis)
+
     # Blueprint-first quiz pipeline (comprehend → plan → multi-span generate) when enabled; otherwise
     # the legacy one-span-per-question path. Comprehension uses a dedicated (long-context) model.
-    if settings.quiz_blueprint_enabled:
+    # Source routing also needs the comprehender wired so it can pick the full-document path per request.
+    blueprint_on = settings.quiz_blueprint_enabled or settings.quiz_source_routing_enabled
+    if blueprint_on:
         blueprint_provider = OpenAIProvider(client, default_model=settings.openai.blueprint_model)
         comprehender = LLMComprehender(
             blueprint_provider, temperature=settings.openai.comprehend_temperature
         )
-        # Independent solve-critique (re-derive each answer from evidence) flags reasoning/key errors
-        # the deterministic numeric check can't catch. Deterministic temperature.
-        critique = None
-        if settings.quiz_solve_verify_enabled:
-            critique = LLMSolveCritique(provider, temperature=settings.openai.verify_temperature)
 
         vision_kwargs: dict = {}
         if settings.quiz_vision_enabled:
@@ -67,24 +78,33 @@ def build_orchestrator(
                 "vision_comprehender": VisionComprehender(
                     blueprint_provider, temperature=settings.openai.comprehend_temperature
                 ),
-                "fetch_source": _make_fetch_source(session_factory),
-                "render_pages": lambda data: render_pdf_to_images(
-                    data, max_pages=settings.limits.vision_max_pages
-                ),
             }
         pipeline = QuizPipeline(
             retrieve=rag_store.retrieve,
             generator=generator,
             comprehender=comprehender,
             fetch_all=rag_store.fetch_all_chunks,
-            critique=critique,
+            fetch_source=fetch_source,
+            render_pages=render_pages,
+            replicator=replicator,
+            fetch_diagrams=fetch_diagrams,
+            source_routing=settings.quiz_source_routing_enabled,
+            context_token_budget=settings.openai.context_token_budget,
             **vision_kwargs,
         )
     else:
-        pipeline = QuizPipeline(retrieve=rag_store.retrieve, generator=generator)
+        pipeline = QuizPipeline(
+            retrieve=rag_store.retrieve,
+            generator=generator,
+            fetch_source=fetch_source,
+            render_pages=render_pages,
+            replicator=replicator,
+            fetch_diagrams=fetch_diagrams,
+        )
 
     registry = ToolRegistry()
     registry.register(EchoTool())
+    registry.register(AskUserTool())
     registry.register(WhoAmITool(mookit_client))
     registry.register(ResolveTaxonomyTool(mookit_client))
     registry.register(PermissionIntrospectTool())
@@ -112,6 +132,20 @@ def build_orchestrator(
         proposal_sink=proposal_sink,
         guardrail_hook=guardrail_hook,
     )
+
+
+def _make_fetch_diagrams(redis):
+    """Build a fetch_diagrams seam: doc_id → DiagramExtractionResult (cropped figures) or None.
+
+    Returns a no-op when Redis is unavailable so the pipeline still runs (no diagram previews)."""
+    from app.diagrams.pipeline import get_diagram_result
+
+    async def fetch_diagrams(ctx: RequestContext, doc_artifact_id: str):
+        if redis is None:
+            return None
+        return await get_diagram_result(redis, ctx.tenant_key, doc_artifact_id)
+
+    return fetch_diagrams
 
 
 def _make_fetch_source(session_factory):

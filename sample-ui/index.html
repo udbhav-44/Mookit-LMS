@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <title>mooKIT AI Assistant — Sample Chat</title>
 <style>
-  :root { --bg:#0f1117; --panel:#171a23; --panel2:#1f2330; --txt:#e8eaf0; --muted:#8b93a7;
+  :root { --bg:#0f1117; --panel:#171a23; --panel2:#1f2330; --txt:#e8eaf0; --muted:#9aa3b8;
           --accent:#5b8cff; --accent2:#3fb98f; --warn:#e0a93f; --danger:#e0603f; --border:#2a2f3d; }
   * { box-sizing: border-box; }
   body { margin:0; font:14px/1.5 system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--txt); }
@@ -14,15 +14,24 @@
            display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
   header h1 { font-size:15px; margin:0; font-weight:600; }
   header .sub { color:var(--muted); font-size:12px; }
-  .cfg { margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; }
+  .cfg { margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
   .cfg input { background:var(--panel2); border:1px solid var(--border); color:var(--txt);
                border-radius:6px; padding:5px 8px; font-size:12px; width:150px; }
+  #new-session { font-size:12px; padding:6px 10px; }
   main { max-width:860px; margin:0 auto; padding:18px; }
   #log { display:flex; flex-direction:column; gap:12px; min-height:50vh; }
-  .msg { padding:10px 14px; border-radius:10px; max-width:80%; white-space:pre-wrap; }
+  .msg { padding:10px 14px; border-radius:10px; max-width:80%; white-space:pre-wrap; position:relative; }
   .msg.user { align-self:flex-end; background:var(--accent); color:#fff; }
-  .msg.assistant { align-self:flex-start; background:var(--panel2); border:1px solid var(--border); }
-  .msg.draft-preview { max-width:100%; width:100%; }
+  .msg.assistant { align-self:flex-start; background:var(--panel2); border:1px solid var(--border); white-space:normal; }
+  .msg.assistant p { margin:0 0 8px; } .msg.assistant p:last-child { margin-bottom:0; }
+  .msg.assistant ul, .msg.assistant ol { margin:6px 0; padding-left:20px; }
+  .msg.assistant code { background:var(--panel); padding:1px 5px; border-radius:4px; font-size:12.5px; }
+  .msg.assistant h1,.msg.assistant h2,.msg.assistant h3 { font-size:14px; margin:8px 0 4px; }
+  .msg .msg-actions { display:none; gap:6px; position:absolute; top:4px; right:6px; }
+  .msg:hover .msg-actions { display:flex; }
+  .msg .msg-actions button { font-size:10px; padding:2px 6px; border-radius:5px; background:rgba(0,0,0,.25);
+    color:var(--txt); border:1px solid var(--border); cursor:pointer; }
+  .msg.draft-preview { max-width:100%; width:100%; white-space:normal; }
   .msg.draft-preview .draft-title { font-weight:600; margin-bottom:6px; }
   .msg.draft-preview .draft-body { margin-top:10px; padding:10px 12px; background:var(--panel);
     border:1px solid var(--border); border-radius:8px; white-space:pre-wrap; line-height:1.45; }
@@ -31,6 +40,12 @@
   .chip.tool { color:var(--accent2); }
   .chip.artifact { color:var(--accent); }
   .chip.err { color:var(--danger); border-color:var(--danger); }
+  /* skeleton */
+  .skeleton { align-self:flex-start; width:60%; max-width:100%; }
+  .skeleton .bar { height:10px; border-radius:5px; margin:7px 0;
+    background:linear-gradient(90deg,var(--panel2),#262b3a,var(--panel2)); background-size:200% 100%;
+    animation:shimmer 1.2s linear infinite; }
+  .skeleton .bar.short { width:40%; } @keyframes shimmer { 0%{background-position:200% 0;} 100%{background-position:-200% 0;} }
   form#chat { display:flex; gap:8px; margin-top:16px; position:sticky; bottom:0; background:var(--bg); padding:8px 0; }
   #input { flex:1; background:var(--panel2); border:1px solid var(--border); color:var(--txt);
            border-radius:8px; padding:10px 12px; font-size:14px; }
@@ -38,8 +53,7 @@
            font-size:14px; cursor:pointer; }
   button.secondary { background:var(--panel2); border:1px solid var(--border); color:var(--txt); }
   button.danger { background:var(--danger); }
-  button:disabled { opacity:.5; cursor:not-allowed; }
-  .files { display:flex; gap:8px; align-items:center; margin-top:6px; color:var(--muted); font-size:12px; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
   /* confirm modal — hidden overlay must NOT block clicks */
   #overlay { position:fixed; inset:0; z-index:1000; background:rgba(0,0,0,.6); display:none;
              align-items:center; justify-content:center; padding:20px;
@@ -48,6 +62,8 @@
   .modal { background:var(--panel); border:1px solid var(--border); border-radius:12px; max-width:560px;
            width:100%; padding:20px; max-height:85vh; overflow:auto; }
   .modal h3 { margin:0 0 8px; }
+  .modal textarea { width:100%; min-height:100px; background:var(--panel2); color:var(--txt);
+    border:1px solid var(--border); border-radius:8px; padding:10px; font:inherit; resize:vertical; }
   .audience { display:inline-block; background:var(--accent2); color:#04221a; font-weight:600;
               border-radius:20px; padding:3px 12px; font-size:12px; margin:6px 0; }
   .modal ul { margin:8px 0; padding-left:18px; }
@@ -58,14 +74,38 @@
   .actions { display:flex; gap:10px; justify-content:flex-end; margin-top:16px; }
   .quick-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; align-self:flex-start; }
   .quick-actions button { font-size:13px; padding:8px 14px; }
+  .clarify { align-self:flex-start; max-width:680px; margin:8px 0; padding:14px 16px; background:var(--panel);
+    border:1px solid var(--accent); border-radius:10px; }
+  .clarify .clarify-head { font-size:12px; color:var(--accent); text-transform:uppercase; letter-spacing:.05em;
+    font-weight:700; margin-bottom:4px; }
+  .clarify .clarify-pre { color:var(--muted); font-size:13px; margin-bottom:12px; }
+  .clarify .cq { margin:12px 0; }
+  .clarify .cq-prompt { font-weight:600; margin-bottom:8px; line-height:1.4; }
+  .clarify .cq-opt { display:flex; align-items:flex-start; gap:8px; padding:6px 8px; border:1px solid var(--border);
+    border-radius:7px; margin:5px 0; cursor:pointer; font-size:13px; }
+  .clarify .cq-opt:hover { border-color:var(--accent); }
+  .clarify .cq-opt input { margin-top:2px; }
+  .clarify .cq-other { width:100%; margin-top:6px; padding:8px 10px; border:1px solid var(--border);
+    border-radius:7px; background:var(--panel2); color:inherit; font:inherit; }
+  .clarify .clarify-submit { margin-top:12px; }
+  .clarify.answered { border-color:var(--border); opacity:.75; }
   .quiz-q { margin:10px 0; padding:12px; background:var(--panel); border:1px solid var(--border); border-radius:8px; }
   .quiz-q .q-num { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
   .quiz-q .q-stem { font-weight:500; margin:6px 0 10px; line-height:1.45; }
   .quiz-q .q-opt { padding:3px 0; font-size:13px; color:var(--muted); }
   .quiz-q .q-opt.correct { color:var(--accent2); font-weight:600; }
   .quiz-q .q-meta { font-size:11px; color:var(--muted); margin-top:8px; }
+  .quiz-q .q-diagram { margin:4px 0 10px; padding:0; }
+  .quiz-q .q-diagram img { display:block; max-width:100%; max-height:320px; border-radius:8px;
+    border:1px solid var(--border); background:#fff; }
+  .quiz-q .q-diagram figcaption { font-size:11px; color:var(--muted); margin-top:4px; }
+  .quiz-q .q-diagram.missing img { display:none; }
+  .quiz-q .q-diagram.missing figcaption::after { content:" (preview unavailable)"; color:var(--warn); }
   .quiz-q .q-cite { font-size:11px; color:var(--muted); margin-top:6px; padding:8px; background:var(--panel2);
     border-radius:6px; border-left:3px solid var(--accent); }
+  .rubric { margin-top:8px; font-size:12px; }
+  .rubric table { width:100%; border-collapse:collapse; }
+  .rubric th, .rubric td { border:1px solid var(--border); padding:3px 6px; text-align:left; color:var(--muted); }
   .draft-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; padding-top:12px;
     border-top:1px solid var(--border); }
   .draft-actions button { font-size:13px; padding:8px 14px; }
@@ -76,6 +116,102 @@
   .q-edit-actions button:hover { border-color:var(--accent); }
   .q-edit-actions button.q-danger { color:var(--danger); }
   .q-edit-actions .q-spacer { flex:1; }
+  #meta-banner { display:none; padding:6px 18px; background:var(--panel2); border-bottom:1px solid var(--border);
+    font-size:12px; color:var(--muted); flex-wrap:wrap; gap:8px; align-items:center; }
+  #meta-banner.show { display:flex; }
+  #meta-banner .badge { display:inline-block; padding:2px 8px; border-radius:12px; font-size:11px;
+    background:var(--panel); border:1px solid var(--border); color:var(--txt); }
+  #meta-banner .badge.warn { border-color:var(--danger); color:var(--danger); }
+  .files-wrap { margin-top:6px; }
+  .files { display:flex; gap:8px; align-items:center; flex-wrap:wrap; color:var(--muted); font-size:12px; }
+  #file-list { display:flex; flex-direction:column; gap:8px; margin-top:8px; }
+  .file-row { padding:10px 12px; background:var(--panel); border:1px solid var(--border); border-radius:8px; font-size:12px; }
+  .file-row .file-head { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
+  .file-row .file-name { font-weight:600; color:var(--txt); }
+  .file-row .file-id { color:var(--muted); font-size:11px; }
+  .file-row .file-rm { margin-left:auto; background:transparent; border:0; color:var(--muted); cursor:pointer;
+    font-size:13px; padding:0 4px; } .file-row .file-rm:hover { color:var(--danger); }
+  .file-row .file-phase { color:var(--muted); margin-top:4px; }
+  .file-progress { height:4px; background:var(--panel2); border-radius:2px; margin-top:6px; overflow:hidden; }
+  .file-progress > div { height:100%; background:var(--accent); transition:width .3s; }
+  .diagram-badge { display:inline-block; font-size:10px; padding:1px 6px; border-radius:10px; margin-left:6px; }
+  .diagram-badge.complete { background:#0d3328; color:var(--accent2); }
+  .diagram-badge.skipped { background:var(--panel2); color:var(--muted); }
+  .diagram-badge.failed { background:#3d1a12; color:var(--danger); }
+  .diagram-badge.pending { background:#2a2410; color:var(--warn); }
+  .diagram-thumbs { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+  .diagram-thumb { width:80px; text-align:center; }
+  .diagram-thumb img { width:80px; height:60px; object-fit:contain; background:var(--panel2);
+    border:1px solid var(--border); border-radius:4px; }
+  .diagram-thumb .cap { font-size:10px; color:var(--muted); margin-top:2px; overflow:hidden;
+    text-overflow:ellipsis; white-space:nowrap; max-width:80px; }
+  .lecture-controls { display:flex; gap:10px; align-items:center; margin-top:6px; font-size:12px; flex-wrap:wrap; }
+  .lecture-controls select, .lecture-controls input { background:var(--panel2); border:1px solid var(--border);
+    color:var(--txt); border-radius:6px; padding:4px 8px; font-size:12px; }
+  .lecture-controls input[type=text] { width:130px; }
+  .video-preview { margin-top:8px; max-width:320px; }
+  .video-preview video { width:100%; border-radius:8px; border:1px solid var(--border); }
+  .quiz-q .q-bloom[data-higher="1"] { color:var(--warn); font-weight:600; }
+  .provenance-badge { display:inline-block; font-size:11px; padding:2px 8px; border-radius:10px;
+    background:var(--panel); border:1px solid var(--border); color:var(--muted); margin-left:8px; }
+  .draft-knobs { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:10px 0; font-size:12px; }
+  .draft-knobs select { background:var(--panel2); border:1px solid var(--border); color:var(--txt);
+    border-radius:6px; padding:4px 8px; }
+  .source-modal .body { max-height:40vh; overflow:auto; font-size:13px; line-height:1.5; }
+  /* empty-state onboarding */
+  #empty { text-align:center; color:var(--muted); padding:40px 10px; }
+  #empty h2 { color:var(--txt); font-size:16px; margin:0 0 6px; }
+  #empty .examples { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-top:16px; }
+  #empty .examples button { font-size:13px; padding:8px 14px; background:var(--panel2); border:1px solid var(--border); color:var(--txt); }
+  /* toasts */
+  #toasts { position:fixed; top:14px; right:14px; z-index:1100; display:flex; flex-direction:column; gap:8px; max-width:340px; }
+  .toast { background:var(--panel); border:1px solid var(--border); border-left:3px solid var(--accent);
+    border-radius:8px; padding:10px 12px; font-size:13px; box-shadow:0 6px 20px rgba(0,0,0,.4); cursor:pointer; }
+  .toast.err { border-left-color:var(--danger); } .toast.warn { border-left-color:var(--warn); }
+  /* editable draft fields */
+  .editable-field { width:100%; background:var(--panel2); color:var(--txt); border:1px solid var(--border);
+    border-radius:8px; padding:8px 10px; font:inherit; }
+  .editable-field.body { min-height:90px; resize:vertical; }
+  /* artifacts panel (taggable files + drafts) */
+  .artifacts-wrap { margin-top:12px; }
+  .artifacts-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  #artifacts-toggle { font-size:12px; padding:6px 12px; }
+  .artifacts-hint { color:var(--muted); font-size:11px; }
+  .artifacts-hint b { color:var(--accent); }
+  #artifacts-list { display:none; flex-direction:column; gap:6px; margin-top:8px; }
+  #artifacts-list.show { display:flex; }
+  .artifacts-group { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin-top:6px; }
+  .artifact-item { display:flex; align-items:center; gap:8px; padding:7px 10px; background:var(--panel);
+    border:1px solid var(--border); border-radius:8px; font-size:12px; }
+  .artifact-item .a-title { font-weight:600; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .artifact-item .a-id { color:var(--muted); font-size:10px; }
+  .artifact-item button.a-tag { font-size:11px; padding:3px 9px; }
+  .artifact-item.tagged { border-color:var(--accent2); }
+  .artifact-item.tagged button.a-tag { background:var(--accent2); color:#04221a; }
+  /* @-mention dropdown */
+  #mention-pop { position:absolute; bottom:calc(100% + 6px); left:0; right:0; max-height:240px; overflow:auto;
+    background:var(--panel); border:1px solid var(--accent); border-radius:10px;
+    box-shadow:0 -6px 24px rgba(0,0,0,.5); display:none; z-index:900; }
+  #mention-pop.show { display:block; }
+  .mention-item { display:flex; align-items:center; gap:8px; padding:8px 12px; cursor:pointer; font-size:13px;
+    border-bottom:1px solid var(--border); }
+  .mention-item:last-child { border-bottom:0; }
+  .mention-item.active, .mention-item:hover { background:var(--panel2); }
+  .mention-item .m-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .mention-item .m-type { font-size:10px; color:var(--muted); margin-left:auto; text-transform:uppercase; }
+  .mention-empty { padding:10px 12px; color:var(--muted); font-size:12px; }
+  /* tagged-reference chips above the input */
+  #ref-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+  #ref-chips:empty { display:none; }
+  .ref-chip { display:inline-flex; align-items:center; gap:6px; font-size:12px; background:var(--panel2);
+    border:1px solid var(--accent); border-radius:16px; padding:3px 6px 3px 10px; color:var(--txt); }
+  .ref-chip button { background:transparent; border:0; color:var(--muted); cursor:pointer; padding:0 2px; font-size:13px; }
+  .ref-chip button:hover { color:var(--danger); }
+  @media (max-width:600px) {
+    .cfg { width:100%; } .cfg input { flex:1 1 120px; width:auto; }
+    main { padding:12px; } .msg { max-width:92%; }
+    .draft-actions button, .quick-actions button { flex:1 1 auto; }
+  }
 </style>
 </head>
 <body>
@@ -87,33 +223,270 @@
     <input id="cfg-course" placeholder="course" value="coursetest" />
     <input id="cfg-uid" placeholder="uid" value="1" />
     <input id="cfg-token" placeholder="token (JWT)" value="" />
+    <button class="secondary" id="new-session" title="Start a fresh conversation">New session</button>
   </div>
 </header>
+<div id="meta-banner"></div>
 <main>
   <div id="log"></div>
-  <div class="files">
-    <input type="file" id="file" multiple accept=".pdf,.docx,.pptx,.xlsx,.csv,.txt,.mp4,.mov,.webm,.mkv,.m4v" />
-    <button class="secondary" id="upload">Upload</button>
-    <span id="file-status"></span>
+  <div class="files-wrap">
+    <div class="files">
+      <input type="file" id="file" multiple accept=".pdf,.docx,.pptx,.xlsx,.csv,.txt,.mp4,.mov,.webm,.mkv,.m4v" />
+      <button class="secondary" id="upload">Upload</button>
+      <span id="file-status"></span>
+    </div>
+    <div id="file-list"></div>
+    <div class="lecture-controls">
+      <label for="lecture-week">Lecture week:</label>
+      <select id="lecture-week"></select>
+      <label for="lecture-module">Module:</label>
+      <input type="text" id="lecture-module" placeholder="(optional)" />
+      <label for="lecture-release">Release:</label>
+      <input type="datetime-local" id="lecture-release" title="Leave blank to publish immediately" />
+    </div>
   </div>
+  <div class="artifacts-wrap">
+    <div class="artifacts-head">
+      <button type="button" class="secondary" id="artifacts-toggle" aria-expanded="false">📚 Artifacts (<span id="artifacts-count">0</span>)</button>
+      <span class="artifacts-hint">your files &amp; drafts this session — type <b>@</b> in the message box to tag one</span>
+    </div>
+    <div id="artifacts-list"></div>
+  </div>
+  <div id="ref-chips"></div>
   <form id="chat">
-    <input id="input" placeholder="e.g. Create a quiz from this PDF · Cancel today's class · Publish this under Week 4" autocomplete="off" />
+    <div id="mention-pop"></div>
+    <input id="input" placeholder="e.g. Create a quiz from this PDF · Cancel today's class · Publish this under Week 4 · @ to tag a file/draft" autocomplete="off" />
     <button type="button" class="secondary danger" id="cancel" style="display:none">Cancel</button>
     <button id="send" type="submit">Send</button>
   </form>
 </main>
 
-<div id="overlay"><div class="modal" id="modal"></div></div>
+<div id="toasts"></div>
+<div id="overlay"><div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"></div></div>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const log = $("log");
-let sessionId = "sess-" + Math.random().toString(36).slice(2);
-let uploadedFiles = [];  // { id, name, ready, kind: 'video'|'document', chunks? }
+let sessionId = "";
+let uploadedFiles = [];  // { id, name, kind, textReady, diagramsReady, ready, chunks, diagrams, localBlobUrl?, rowEl? }
 let chatAbort = null;
+let appMeta = null;
+let offeredActionsKey = "";
+let lastUserText = "";
+let draftArtifacts = [];  // { id, title, type, version } — drafts seen via artifact_updated this session
+let pendingRefs = [];     // { id, title, type } — artifacts @-tagged for the next message
 
-function isVideoName(name) {
-  return /\.(mp4|mov|webm|mkv|m4v)$/i.test(name || "");
+// ---- Permissions ------------------------------------------------------------
+// appMeta.permissions = { resource: [actions...] }. When unknown (not loaded / not enforced),
+// default to allowed so the UI stays usable in dev.
+function can(resource, action) {
+  const perms = appMeta && appMeta.permissions;
+  if (!perms || typeof perms !== "object") return true;
+  const list = perms[resource];
+  if (!Array.isArray(list)) return true;
+  return list.includes(action);
+}
+function gate(btn, resource, action, why) {
+  if (!btn) return btn;
+  if (!can(resource, action)) {
+    btn.disabled = true;
+    btn.title = why || `Requires ${resource}:${action} permission`;
+  }
+  return btn;
+}
+
+function isPdfName(name) { return /\.pdf$/i.test(name || ""); }
+function isVideoName(name) { return /\.(mp4|mov|webm|mkv|m4v)$/i.test(name || ""); }
+function lookupFileName(id) { const f = uploadedFiles.find((x) => x.id === id); return f ? f.name : id; }
+
+// ---- Artifacts registry (taggable files + drafts) --------------------------
+const ARTIFACT_META = {
+  uploaded_file:      { icon: "📄", label: "Files" },
+  assessment_draft:   { icon: "📝", label: "Quizzes" },
+  announcement_draft: { icon: "📣", label: "Announcements" },
+  lecture_draft:      { icon: "🎬", label: "Lectures" },
+};
+function artifactIcon(type) { return (ARTIFACT_META[type] || {}).icon || "📦"; }
+
+// Unified, current-session view of everything the instructor can @-tag.
+function allArtifacts() {
+  const files = uploadedFiles
+    .filter((f) => !String(f.id).startsWith("pending-"))
+    .map((f) => ({ id: f.id, title: f.name, type: "uploaded_file", ready: !!f.textReady }));
+  return files.concat(draftArtifacts.map((a) => ({ ...a, ready: true })));
+}
+function artifactById(id) { return allArtifacts().find((a) => a.id === id); }
+
+function draftTitle(d) {
+  return (d.preview && d.preview.title)
+    || (d.payload && d.payload.title)
+    || (String(d.type || "").replace("_draft", "") + " draft");
+}
+function upsertDraftArtifact(d) {
+  if (!d || !d.artifact_id) return;
+  const entry = { id: d.artifact_id, title: draftTitle(d), type: d.type, version: d.version };
+  const idx = draftArtifacts.findIndex((a) => a.id === entry.id);
+  if (idx >= 0) draftArtifacts[idx] = { ...draftArtifacts[idx], ...entry };
+  else draftArtifacts.push(entry);
+  // Keep any active tag chip label in sync with the latest version/title.
+  const ref = pendingRefs.find((r) => r.id === entry.id);
+  if (ref) { ref.title = entry.title; renderRefChips(); }
+  renderArtifactsPanel();
+}
+
+function renderArtifactsPanel() {
+  const list = $("artifacts-list");
+  const all = allArtifacts();
+  const countEl = $("artifacts-count");
+  if (countEl) countEl.textContent = String(all.length);
+  if (!list) return;
+  if (!all.length) {
+    list.innerHTML = '<div class="mention-empty">No files or drafts yet — upload a file or create a draft and it shows up here.</div>';
+    return;
+  }
+  const groups = {};
+  for (const a of all) (groups[a.type] = groups[a.type] || []).push(a);
+  let html = "";
+  for (const type of Object.keys(ARTIFACT_META)) {
+    const items = groups[type];
+    if (!items || !items.length) continue;
+    html += `<div class="artifacts-group">${escapeHtml(ARTIFACT_META[type].label)}</div>`;
+    for (const a of items) {
+      const tagged = pendingRefs.some((r) => r.id === a.id);
+      html +=
+        `<div class="artifact-item${tagged ? " tagged" : ""}">` +
+        `<span>${artifactIcon(a.type)}</span>` +
+        `<span class="a-title" title="${escapeHtml(a.title)}">${escapeHtml(a.title)}</span>` +
+        `<span class="a-id">${escapeHtml(String(a.id).slice(0, 8))}…</span>` +
+        `<button type="button" class="secondary a-tag" data-tag="${escapeHtml(a.id)}">${tagged ? "✓ tagged" : "@ tag"}</button>` +
+        `</div>`;
+    }
+  }
+  list.innerHTML = html;
+  list.querySelectorAll("button.a-tag").forEach((b) => { b.onclick = () => toggleRef(b.dataset.tag); });
+}
+
+// ---- Tagged references (the unambiguous "picked up" confirmation) ----------
+function addRef(id) {
+  if (pendingRefs.some((r) => r.id === id)) return;
+  const a = artifactById(id);
+  if (!a) return;
+  pendingRefs.push({ id: a.id, title: a.title, type: a.type });
+  renderRefChips(); renderArtifactsPanel();
+}
+function removeRef(id) {
+  pendingRefs = pendingRefs.filter((r) => r.id !== id);
+  renderRefChips(); renderArtifactsPanel();
+}
+function toggleRef(id) {
+  if (pendingRefs.some((r) => r.id === id)) removeRef(id);
+  else addRef(id);
+}
+function renderRefChips() {
+  const bar = $("ref-chips");
+  if (!bar) return;
+  bar.innerHTML = "";
+  for (const r of pendingRefs) {
+    const chip = document.createElement("span");
+    chip.className = "ref-chip";
+    const label = document.createElement("span");
+    label.textContent = artifactIcon(r.type) + " @" + r.title;
+    chip.appendChild(label);
+    const x = document.createElement("button");
+    x.type = "button"; x.textContent = "✕"; x.title = "remove tag";
+    x.onclick = () => removeRef(r.id);
+    chip.appendChild(x);
+    bar.appendChild(chip);
+  }
+}
+
+// ---- @-mention autocomplete on the chat input ------------------------------
+let mentionActive = -1;
+function currentMentionQuery() {
+  const inp = $("input");
+  const pos = inp.selectionStart ?? inp.value.length;
+  const upto = inp.value.slice(0, pos);
+  const m = upto.match(/(?:^|\s)@([^\s@]*)$/);
+  return m ? { query: m[1], start: pos - m[1].length - 1, end: pos } : null;
+}
+function mentionCandidates(query) {
+  const q = (query || "").toLowerCase();
+  return allArtifacts()
+    .filter((a) => a.title.toLowerCase().includes(q) && !pendingRefs.some((r) => r.id === a.id))
+    .slice(0, 8);
+}
+function showMentionPop() {
+  const pop = $("mention-pop");
+  const ctx = currentMentionQuery();
+  if (!ctx) { hideMentionPop(); return; }
+  const cands = mentionCandidates(ctx.query);
+  mentionActive = cands.length ? 0 : -1;
+  if (!cands.length) {
+    pop.innerHTML = '<div class="mention-empty">No matching files or drafts</div>';
+  } else {
+    pop.innerHTML = cands.map((a, i) =>
+      `<div class="mention-item${i === 0 ? " active" : ""}" data-aid="${escapeHtml(a.id)}">` +
+      `<span>${artifactIcon(a.type)}</span>` +
+      `<span class="m-title">${escapeHtml(a.title)}</span>` +
+      `<span class="m-type">${escapeHtml(a.type.replace("_draft", ""))}</span></div>`
+    ).join("");
+    pop.querySelectorAll(".mention-item").forEach((el) => {
+      el.onmousedown = (e) => { e.preventDefault(); pickMention(el.dataset.aid); };
+    });
+  }
+  pop.classList.add("show");
+  pop._ctx = ctx;
+  pop._cands = cands;
+}
+function hideMentionPop() {
+  const p = $("mention-pop");
+  p.classList.remove("show");
+  p._ctx = null; p._cands = null; mentionActive = -1;
+}
+function highlightMention() {
+  const items = $("mention-pop").querySelectorAll(".mention-item");
+  items.forEach((el, i) => el.classList.toggle("active", i === mentionActive));
+  items[mentionActive]?.scrollIntoView({ block: "nearest" });
+}
+function pickMention(id) {
+  const inp = $("input");
+  const ctx = $("mention-pop")._ctx;
+  addRef(id);
+  // Strip the partial "@query" text so the chip bar is the single source of truth.
+  if (ctx) {
+    const before = inp.value.slice(0, ctx.start);
+    const after = inp.value.slice(inp.selectionStart ?? inp.value.length);
+    inp.value = before + after;
+    const newPos = before.length;
+    inp.setSelectionRange(newPos, newPos);
+  }
+  hideMentionPop();
+  inp.focus();
+}
+
+function diagramImageUrl(fileId, diagramFile) {
+  return baseUrl() + "/v1/files/" + encodeURIComponent(fileId) + "/diagrams/" + encodeURIComponent(diagramFile);
+}
+async function fetchDiagramBlobUrl(fileId, diagramFile) {
+  const r = await fetch(diagramImageUrl(fileId, diagramFile), { headers: headers() });
+  if (!r.ok) return null;
+  const blob = await r.blob();
+  return URL.createObjectURL(blob);
+}
+// Load the cropped figure attached to each quiz question (auth headers can't ride on <img src>,
+// so we fetch the PNG as a blob and swap it in). Best-effort: a missing figure just stays blank.
+async function loadQuestionDiagrams(card) {
+  const imgs = card.querySelectorAll("img.q-diagram-img[data-file]");
+  for (const img of imgs) {
+    if (img.dataset.loaded) continue;
+    img.dataset.loaded = "1";
+    try {
+      const url = await fetchDiagramBlobUrl(img.dataset.file, img.dataset.diag);
+      if (url) img.src = url; else img.closest(".q-diagram")?.classList.add("missing");
+    } catch (_) {
+      img.closest(".q-diagram")?.classList.add("missing");
+    }
+  }
 }
 
 function headers(extra={}) {
@@ -126,15 +499,86 @@ function headers(extra={}) {
 }
 function baseUrl() { return $("cfg-base").value.trim().replace(/\/$/, ""); }
 
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+// ---- Safe minimal markdown (escape-first; no raw HTML, no links → anti-exfil) ----
+function renderMarkdown(src) {
+  const lines = String(src || "").split("\n");
+  let html = "", listType = null;
+  const closeList = () => { if (listType) { html += `</${listType}>`; listType = null; } };
+  const inline = (t) => escapeHtml(t)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    let m;
+    if ((m = line.match(/^(#{1,3})\s+(.*)$/))) { closeList(); html += `<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`; }
+    else if ((m = line.match(/^\s*[-*]\s+(.*)$/))) { if (listType !== "ul") { closeList(); html += "<ul>"; listType = "ul"; } html += `<li>${inline(m[1])}</li>`; }
+    else if ((m = line.match(/^\s*\d+\.\s+(.*)$/))) { if (listType !== "ol") { closeList(); html += "<ol>"; listType = "ol"; } html += `<li>${inline(m[1])}</li>`; }
+    else if (line.trim() === "") { closeList(); }
+    else { closeList(); html += `<p>${inline(line)}</p>`; }
+  }
+  closeList();
+  return html;
+}
+
+// ---- Toasts + centralized error surfacing ----------------------------------
+function toast(msg, kind="") {
+  const t = document.createElement("div");
+  t.className = "toast " + kind;
+  t.textContent = msg;
+  t.onclick = () => t.remove();
+  $("toasts").appendChild(t);
+  setTimeout(() => t.remove(), 6500);
+}
+function friendlyError(status, detail, context) {
+  const d = detail ? (": " + detail) : "";
+  if (status === 401) return "Not authenticated — paste a fresh mooKIT JWT in the token field (or ?token=… in the URL).";
+  if (status === 403) return "Permission denied — check the course short-name, a current token, and matching uid" + d;
+  if (status === 413) return "File too large" + (appMeta?.limits?.maxFileSizeBytes ? ` (max ${Math.round(appMeta.limits.maxFileSizeBytes/1048576)} MB)` : "") + ".";
+  if (status === 400) return (context ? context + " — " : "") + "rejected" + d;
+  if (status === 404) return (context || "Resource") + " not found.";
+  if (status >= 500) return "Service error" + d + " — please retry.";
+  return (context || "Request failed") + (status ? ` (HTTP ${status})` : "") + d;
+}
+function surfaceError(status, detail, context) {
+  const msg = friendlyError(status, detail, context);
+  toast(msg, status === 401 || status === 403 ? "warn" : "err");
+  addChip(msg, "err");
+}
+
+function clearEmptyState() { const e = $("empty"); if (e) e.remove(); }
+
 function addMsg(role, text="") {
+  clearEmptyState();
   const el = document.createElement("div");
   el.className = "msg " + role;
-  el.textContent = text;
+  el._raw = text;
+  if (role === "assistant") el.innerHTML = renderMarkdown(text); else el.textContent = text;
+  // hover actions
+  const bar = document.createElement("div");
+  bar.className = "msg-actions";
+  if (role === "assistant") {
+    const c = document.createElement("button"); c.textContent = "copy";
+    c.onclick = () => { navigator.clipboard?.writeText(el._raw || el.textContent); toast("copied"); };
+    bar.appendChild(c);
+  } else {
+    const rt = document.createElement("button"); rt.textContent = "retry";
+    rt.onclick = () => sendChatMessage(el._raw || el.textContent);
+    const ed = document.createElement("button"); ed.textContent = "edit";
+    ed.onclick = () => { $("input").value = el._raw || el.textContent; $("input").focus(); };
+    bar.appendChild(rt); bar.appendChild(ed);
+  }
+  el.appendChild(bar);
   log.appendChild(el);
   scrollLog();
   return el;
 }
+function setAssistantText(el, text) { el._raw = text; el.innerHTML = renderMarkdown(text); }
+
 function addChip(text, kind="") {
+  clearEmptyState();
   const el = document.createElement("div");
   el.className = "chip " + kind;
   el.textContent = text;
@@ -142,7 +586,6 @@ function addChip(text, kind="") {
   scrollLog();
   return el;
 }
-
 function scrollLog() {
   window.requestAnimationFrame(() => log.lastElementChild?.scrollIntoView({block:"nearest", behavior:"smooth"}));
 }
@@ -155,151 +598,435 @@ function addQuickActions(buttons) {
     btn.type = "button";
     btn.className = b.secondary ? "secondary" : "";
     btn.textContent = b.label;
-    btn.onclick = () => { $("input").value = b.message; $("chat").requestSubmit(); };
+    if (b.resource) gate(btn, b.resource, b.action);
+    btn.onclick = () => sendChatMessage(b.message);
     row.appendChild(btn);
   }
   log.appendChild(row);
   scrollLog();
 }
 
+// ---- Clarifying questions (agent → instructor) -------------------------
+// The agent pauses the turn to ask. We render selectable options (+ free-text "Other"),
+// then compose the selection into a normal chat message that auto-continues the task.
+function showClarification(d) {
+  clearEmptyState();
+  const questions = Array.isArray(d.questions) ? d.questions : [];
+  if (!questions.length) return;
+  const card = document.createElement("div");
+  card.className = "clarify";
+  let html = '<div class="clarify-head">A quick question</div>';
+  if (d.preamble) html += `<div class="clarify-pre">${escapeHtml(d.preamble)}</div>`;
+  questions.forEach((q, qi) => {
+    const name = `cq_${qi}`;
+    const inputType = q.allow_multiple ? "checkbox" : "radio";
+    html += `<div class="cq" data-qid="${escapeHtml(q.id || name)}" data-prompt="${escapeHtml(q.prompt || "")}">`;
+    html += `<div class="cq-prompt">${escapeHtml(q.prompt || "")}</div>`;
+    (q.options || []).forEach((o, oi) => {
+      const id = `${name}_${oi}`;
+      html += `<label class="cq-opt" for="${id}">`
+        + `<input type="${inputType}" name="${name}" id="${id}" value="${escapeHtml(o.label || o.id || "")}">`
+        + `<span>${escapeHtml(o.label || o.id || "")}</span></label>`;
+    });
+    if (q.allow_free_text !== false) {
+      html += `<input type="text" class="cq-other" name="${name}" placeholder="Other — type your own answer">`;
+    }
+    html += `</div>`;
+  });
+  html += '<div class="clarify-submit"><button type="button">Submit answer</button></div>';
+  card.innerHTML = html;
+
+  card.querySelector(".clarify-submit button").onclick = () => {
+    const lines = [];
+    let answered = false;
+    card.querySelectorAll(".cq").forEach((cq) => {
+      const prompt = cq.dataset.prompt || "";
+      const picked = [];
+      cq.querySelectorAll('input[type="radio"]:checked, input[type="checkbox"]:checked')
+        .forEach((i) => { if (i.value.trim()) picked.push(i.value.trim()); });
+      const other = cq.querySelector(".cq-other");
+      if (other && other.value.trim()) picked.push(other.value.trim());
+      if (picked.length) answered = true;
+      lines.push(`${prompt} ${picked.join("; ") || "(no preference)"}`.trim());
+    });
+    if (!answered) { toast("Pick an option or type an answer"); return; }
+    card.classList.add("answered");
+    card.querySelectorAll("input, button").forEach((el) => { el.disabled = true; });
+    sendChatMessage(lines.join("\n"));
+  };
+
+  log.appendChild(card);
+  scrollLog();
+}
+
 // ---- File upload + indexing status -------------------------------------
+function upsertFileEntry(entry) {
+  const idx = uploadedFiles.findIndex((f) => f.id === entry.id);
+  if (idx >= 0) {
+    const prev = uploadedFiles[idx];
+    uploadedFiles[idx] = { ...prev, ...entry, rowEl: entry.rowEl || prev.rowEl };
+  } else uploadedFiles.push(entry);
+  renderFileRow(uploadedFiles.find((f) => f.id === entry.id));
+  renderArtifactsPanel();
+  if (entry.textReady) offerFileActions();
+}
+
+function renderFileRow(f) {
+  if (!f) return;
+  const list = $("file-list");
+  let row = f.rowEl;
+  if (!row) {
+    row = document.createElement("div");
+    row.className = "file-row";
+    row.dataset.fileId = f.id;
+    f.rowEl = row;
+    list.appendChild(row);
+  }
+  const pct = f.progressPct ?? (f.textReady && f.diagramsReady ? 100 : f.progressPct ?? 0);
+  let badge = "";
+  if (f.kind === "document" && f.textReady) {
+    if (!f.diagramsReady) badge = '<span class="diagram-badge pending">diagrams…</span>';
+    else if (f.diagrams?.status === "complete") badge = `<span class="diagram-badge complete">${f.diagrams.total_diagrams} diagram(s)</span>`;
+    else if (f.diagrams?.status === "skipped") badge = '<span class="diagram-badge skipped">no diagrams</span>';
+    else if (f.diagrams?.status === "failed") badge = '<span class="diagram-badge failed">diagram error</span>';
+  }
+  let thumbs = "";
+  if (f.diagramsReady && f.diagrams?.diagrams?.length) {
+    thumbs = '<div class="diagram-thumbs" data-thumbs-for="' + escapeHtml(f.id) + '">Loading previews…</div>';
+  }
+  let videoBlock = "";
+  if (f.kind === "video" && f.localBlobUrl) {
+    videoBlock = `<div class="video-preview"><video controls src="${f.localBlobUrl}"></video></div>`;
+  }
+  const idShort = String(f.id).startsWith("pending-") ? "" : `<span class="file-id">${escapeHtml(String(f.id).slice(0, 8))}…</span>`;
+  const rmBtn = `<button class="file-rm" title="Remove file" data-rm="${escapeHtml(f.id)}">✕</button>`;
+  row.innerHTML =
+    `<div class="file-head"><span class="file-name">${escapeHtml(f.name)}</span>` +
+    `${idShort}${badge}${rmBtn}</div>` +
+    `<div class="file-phase">${escapeHtml(f.phaseText || "waiting…")}</div>` +
+    (pct != null && f.kind === "document" ? `<div class="file-progress"><div style="width:${Math.min(100, pct)}%"></div></div>` : "") +
+    (f.uploadPct != null ? `<div class="file-progress"><div style="width:${f.uploadPct}%"></div></div>` : "") +
+    videoBlock + thumbs;
+  const rm = row.querySelector(".file-rm");
+  if (rm) rm.onclick = () => removeFile(f.id);
+  if (f.diagramsReady && f.diagrams?.diagrams?.length) loadDiagramThumbs(f);
+}
+
+async function removeFile(fileId) {
+  const f = uploadedFiles.find((x) => x.id === fileId);
+  const persisted = f && !String(fileId).startsWith("pending-");
+  if (persisted) {
+    try {
+      const r = await fetch(baseUrl() + "/v1/files/" + encodeURIComponent(fileId), { method: "DELETE", headers: headers() });
+      if (!r.ok) { let j={}; try{j=await r.json();}catch{} surfaceError(r.status, j.detail, "delete file"); return; }
+    } catch (e) { surfaceError(0, e.message, "delete file"); return; }
+  }
+  f?.rowEl?.remove();
+  if (f?.localBlobUrl) URL.revokeObjectURL(f.localBlobUrl);
+  uploadedFiles = uploadedFiles.filter((x) => x.id !== fileId);
+  pendingRefs = pendingRefs.filter((r) => r.id !== fileId);
+  offeredActionsKey = "";  // allow re-offering with the new file set
+  updateFilesPanelSummary();
+  renderRefChips();
+  renderArtifactsPanel();
+  toast("removed " + (f ? f.name : fileId));
+}
+
+async function loadDiagramThumbs(f) {
+  const container = f.rowEl?.querySelector(".diagram-thumbs");
+  if (!container || container.dataset.loaded) return;
+  container.dataset.loaded = "1";
+  container.innerHTML = "";
+  for (const d of f.diagrams.diagrams) {
+    const wrap = document.createElement("div");
+    wrap.className = "diagram-thumb";
+    const img = document.createElement("img");
+    img.alt = d.diagram_description || "diagram";
+    img.title = d.question_text || "";
+    wrap.appendChild(img);
+    const cap = document.createElement("div");
+    cap.className = "cap";
+    cap.textContent = "p" + d.page_number + (d.question_number ? " · " + d.question_number : "");
+    wrap.appendChild(cap);
+    container.appendChild(wrap);
+    try {
+      const url = await fetchDiagramBlobUrl(f.id, d.diagram_file);
+      if (url) img.src = url;
+    } catch (_) { /* non-fatal */ }
+  }
+}
+
+function updateFilesPanelSummary() {
+  const textReady = uploadedFiles.filter((f) => f.textReady);
+  if (!textReady.length) {
+    $("file-status").textContent = uploadedFiles.length ? "processing…" : "no files yet";
+    return;
+  }
+  $("file-status").textContent = textReady.length + " file(s) text-ready";
+}
+
 function registerReadyFile(entry) {
-  if (!uploadedFiles.some((f) => f.id === entry.id)) uploadedFiles.push(entry);
-  else uploadedFiles = uploadedFiles.map((f) => (f.id === entry.id ? entry : f));
-  updateFilesPanel();
-  offerFileActions();
+  upsertFileEntry(Object.assign({ ready: Boolean(entry.textReady) }, entry));
+  updateFilesPanelSummary();
 }
 
 function offerQuizActions(readyDocs) {
   if (!readyDocs.length) return;
+  const pendingDiagrams = readyDocs.filter((f) => isPdfName(f.name) && !f.diagramsReady);
+  if (pendingDiagrams.length) {
+    addChip("ℹ️ Quiz can be created; diagram images attach at publish when extraction finishes.", "artifact");
+  }
   if (readyDocs.length === 1) {
     const f = readyDocs[0];
     addQuickActions([
-      { label: "Create quiz from " + f.name, message: `Create a quiz from file ${f.id} (${f.name})` },
+      { label: "Create quiz from " + f.name, message: `Create a quiz from file ${f.id} (${f.name})`, resource: "assessments", action: "create" },
     ]);
     return;
   }
   const ids = readyDocs.map((f) => f.id).join(", ");
   const names = readyDocs.map((f) => f.name).join(", ");
   addQuickActions([
-    {
-      label: "Create quiz from all " + readyDocs.length + " files",
-      message: `Create a quiz from these files: ${ids} (${names})`,
-    },
-    ...readyDocs.map((f) => ({
-      label: "Quiz from " + f.name + " only",
-      message: `Create a quiz from file ${f.id} (${f.name})`,
-      secondary: true,
-    })),
+    { label: "Create quiz from all " + readyDocs.length + " files", message: `Create a quiz from these files: ${ids} (${names})`, resource: "assessments", action: "create" },
+    ...readyDocs.map((f) => ({ label: "Quiz from " + f.name + " only", message: `Create a quiz from file ${f.id} (${f.name})`, secondary: true, resource: "assessments", action: "create" })),
   ]);
 }
 
+function lectureMessageFor(v) {
+  const week = $("lecture-week").value || "4";
+  const module = $("lecture-module").value.trim();
+  const release = $("lecture-release").value;
+  let msg = `Publish this video lecture under Week ${week}`;
+  if (module) msg += ` in module "${module}"`;
+  if (release) msg += ` scheduled for ${release}`;
+  msg += ` — file ${v.id} (${v.name})`;
+  return msg;
+}
 function offerLectureActions(readyVideos) {
   for (const v of readyVideos) {
     addQuickActions([
-      {
-        label: "Publish " + v.name + " under Week 4",
-        message: `Publish this video lecture under Week 4 — file ${v.id} (${v.name})`,
-      },
-      {
-        label: "Publish under Week 5",
-        message: `Publish this video under Week 5 — file ${v.id} (${v.name})`,
-        secondary: true,
-      },
+      { label: "Publish " + v.name + " as a lecture", message: lectureMessageFor(v), resource: "lectures", action: "create" },
     ]);
   }
 }
 
 function offerFileActions() {
-  const ready = uploadedFiles.filter((f) => f.ready);
-  const readyDocs = ready.filter((f) => f.kind === "document");
-  const readyVideos = ready.filter((f) => f.kind === "video");
+  const key = uploadedFiles.map((f) => f.id + ":" + (f.textReady ? "1" : "0")).join("|");
+  if (key === offeredActionsKey) return;
+  offeredActionsKey = key;
+  const textReady = uploadedFiles.filter((f) => f.textReady);
+  const readyDocs = textReady.filter((f) => f.kind === "document");
+  const readyVideos = textReady.filter((f) => f.kind === "video");
   if (readyVideos.length) offerLectureActions(readyVideos);
   if (readyDocs.length) offerQuizActions(readyDocs);
 }
 
-function updateFilesPanel() {
-  const ready = uploadedFiles.filter((f) => f.ready);
-  if (!ready.length) {
-    $("file-status").textContent = "no files ready yet";
-    return;
-  }
-  $("file-status").textContent =
-    ready.length + " file(s) ready: " +
-    ready.map((f) => f.name + (f.kind === "video" ? " (video)" : "")).join(", ");
-}
-
 async function pollFileStatus(fileId, name, kind) {
-  if (kind === "video") return;  // videos are ready immediately after upload
-  const maxAttempts = 120;
+  if (kind === "video") return;
+  upsertFileEntry({ id: fileId, name, kind: "document", textReady: false, diagramsReady: false, phaseText: "uploaded — waiting for indexing…" });
+  const maxAttempts = 180;
+  let textReadyAnnounced = false;
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise((r) => setTimeout(r, 1000));
+    if (!uploadedFiles.some((f) => f.id === fileId)) return;  // removed mid-poll
     try {
       const r = await fetch(baseUrl() + "/v1/files/" + fileId + "/status", { headers: headers() });
       const st = await r.json();
       const data = st.data || st;
       const status = data.extractionStatus || "unknown";
       const pct = data.progress?.pct;
-      const msg = data.progress?.message;
-      if (status === "indexed" || data.ready) {
+      const msg = data.progress?.message || "";
+      const diagrams = data.diagrams;
+      const textReady = status === "indexed" || data.ready;
+      const diagramsReady = diagrams != null || (data.progress?.pct === 100) || (data.progress?.status === "complete");
+      const phaseText = status + (pct != null ? " " + pct + "%" : "") + (msg ? " — " + msg : "");
+      upsertFileEntry({
+        id: fileId, name, kind: "document", textReady, diagramsReady, ready: textReady,
+        chunks: data.chunkCount, diagrams, progressPct: pct, phaseText,
+      });
+      if (textReady && !textReadyAnnounced) {
+        textReadyAnnounced = true;
         const n = data.chunkCount ?? "?";
-        registerReadyFile({ id: fileId, name, ready: true, kind: "document", chunks: n });
         addChip("✅ " + name + " indexed — " + n + " text chunks ready", "artifact");
+      }
+      if (diagramsReady) {
+        if (diagrams?.status === "complete" && diagrams.total_diagrams > 0) {
+          addChip("🖼 " + name + " — " + diagrams.total_diagrams + " diagram(s) extracted", "artifact");
+        }
         return;
       }
       if (status === "failed") {
-        $("file-status").textContent = name + " · indexing failed";
         addChip("❌ indexing failed for " + name + (msg ? ": " + msg : ""), "err");
         return;
       }
-      $("file-status").textContent = name + " · " + status + (pct != null ? " " + pct + "%" : "") + (msg ? " — " + msg : "");
     } catch (e) {
-      $("file-status").textContent = name + " · status check failed";
+      upsertFileEntry({ id: fileId, name, phaseText: "status check failed" });
       return;
     }
   }
-  $("file-status").textContent = name + " · still indexing (poll timed out)";
+  upsertFileEntry({ id: fileId, name, phaseText: "still processing (poll timed out)" });
+}
+
+function uploadOneFileXHR(f) {
+  return new Promise((resolve, reject) => {
+    const kind = isVideoName(f.name) ? "video" : "document";
+    const fd = new FormData();
+    fd.append("file", f);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", baseUrl() + "/v1/files");
+    const h = headers();
+    for (const [k, v] of Object.entries(h)) xhr.setRequestHeader(k, v);
+    xhr.upload.onprogress = (ev) => {
+      if (ev.lengthComputable) {
+        const pct = Math.round((ev.loaded / ev.total) * 100);
+        upsertFileEntry({ id: "pending-" + f.name, name: f.name, kind, uploadPct: pct, phaseText: "uploading " + pct + "%…" });
+      }
+    };
+    xhr.onload = () => {
+      let j;
+      try { j = JSON.parse(xhr.responseText); } catch { reject({ status: xhr.status, detail: "invalid response" }); return; }
+      if (xhr.status >= 400) { reject({ status: xhr.status, detail: j.detail || xhr.statusText }); return; }
+      resolve({ f, j: j.data || j, kind });
+    };
+    xhr.onerror = () => reject({ status: 0, detail: "network error" });
+    xhr.send(fd);
+  });
 }
 
 async function uploadOneFile(f) {
   const kind = isVideoName(f.name) ? "video" : "document";
-  const fd = new FormData();
-  fd.append("file", f);
-  const r = await fetch(baseUrl() + "/v1/files", { method:"POST", headers: headers(), body: fd });
-  const j = await r.json();
-  if (!r.ok) throw new Error(j.detail || r.statusText);
-  const art = j.data || j;
-  const fileId = art.fileId || art.artifact?.id;
-  const fileKind = art.fileKind || kind;
-  if (fileKind === "video" || art.ready) {
-    registerReadyFile({ id: fileId, name: f.name, ready: true, kind: "video" });
+  const localBlobUrl = kind === "video" ? URL.createObjectURL(f) : null;
+  const { j } = await uploadOneFileXHR(f);
+  const fileId = j.fileId || j.artifact?.id;
+  const fileKind = j.fileKind || kind;
+  uploadedFiles = uploadedFiles.filter((x) => !String(x.id).startsWith("pending-"));
+  $("file-list").querySelectorAll('[data-file-id^="pending-"]').forEach((el) => el.remove());
+  if (fileKind === "video" || j.ready) {
+    registerReadyFile({ id: fileId, name: f.name, textReady: true, diagramsReady: true, kind: "video", localBlobUrl, phaseText: "stored — ready to publish" });
     addChip("🎬 video stored: " + f.name + " (id " + fileId + ") — ready to publish as lecture", "artifact");
   } else {
+    upsertFileEntry({ id: fileId, name: f.name, kind: "document", phaseText: "uploaded — waiting for text extraction…" });
     addChip("📎 uploaded " + f.name + " (id " + fileId + ") — waiting for text extraction…", "artifact");
     pollFileStatus(fileId, f.name, "document");
   }
 }
 
+const ALLOWED_EXT = [".pdf",".docx",".pptx",".xlsx",".csv",".txt",".mp4",".mov",".webm",".mkv",".m4v"];
+function precheckFile(f) {
+  const ext = "." + (f.name.split(".").pop() || "").toLowerCase();
+  const allowed = (appMeta?.allowedFileTypes || ALLOWED_EXT);
+  if (!allowed.includes(ext)) return `unsupported type "${ext}" (allowed: ${allowed.join(", ")})`;
+  const max = appMeta?.limits?.maxFileSizeBytes;
+  if (max && f.size > max) return `too large: ${Math.round(f.size/1048576)} MB (max ${Math.round(max/1048576)} MB)`;
+  return null;
+}
+
 $("upload").onclick = async () => {
   const files = [...($("file").files || [])];
   if (!files.length) { $("file-status").textContent = "choose one or more files first"; return; }
+  // Pre-check before sending a single byte.
+  for (const f of files) {
+    const err = precheckFile(f);
+    if (err) { surfaceError(400, err, "upload " + f.name); return; }
+  }
   $("file-status").textContent = "uploading " + files.length + " file(s)…";
+  $("upload").disabled = true;
   try {
     for (const f of files) await uploadOneFile(f);
-    $("file-status").textContent = files.length + " file(s) uploading — wait for indexing…";
     $("file").value = "";
-  } catch (e) { $("file-status").textContent = "upload failed: " + e.message; }
+  } catch (e) {
+    const status = e.status ?? 0, detail = e.detail || e.message;
+    $("file-status").textContent = "upload failed";
+    surfaceError(status, detail, "upload");
+    uploadedFiles = uploadedFiles.filter((x) => !String(x.id).startsWith("pending-"));
+    $("file-list").querySelectorAll('[data-file-id^="pending-"]').forEach((el) => el.remove());
+  }
+  finally { $("upload").disabled = false; updateFilesPanelSummary(); }
 };
+
+// Populate lecture week selector
+(function initWeekPicker() {
+  const sel = $("lecture-week");
+  for (let w = 1; w <= 16; w++) {
+    const opt = document.createElement("option");
+    opt.value = String(w);
+    opt.textContent = "Week " + w;
+    if (w === 4) opt.selected = true;
+    sel.appendChild(opt);
+  }
+})();
+
+// ---- Modal infrastructure (focus trap, Esc, restore focus) -----------------
+let _modalPrevFocus = null;
+let _modalOnClose = null;
+function openModal(onClose) {
+  _modalPrevFocus = document.activeElement;
+  _modalOnClose = onClose || null;
+  $("overlay").classList.add("show");
+  const focusable = $("modal").querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+  // Focus the FIRST focusable — that's the Cancel button (or a text input), the safe default for
+  // a publish/delete confirmation, so a stray Enter never triggers the destructive action.
+  (focusable[0] || $("modal")).focus?.();
+  $("overlay").onclick = (e) => { if (e.target === $("overlay")) closeModal(true); };
+}
+function closeModal(viaCancel) {
+  $("overlay").classList.remove("show");
+  $("overlay").onclick = null;
+  const cb = _modalOnClose; _modalOnClose = null;
+  if (viaCancel && cb) cb();
+  _modalPrevFocus?.focus?.();
+  _modalPrevFocus = null;
+}
+document.addEventListener("keydown", (e) => {
+  if (!$("overlay").classList.contains("show")) return;
+  if (e.key === "Escape") { e.preventDefault(); closeModal(true); return; }
+  if (e.key === "Tab") {  // focus trap
+    const f = [...$("modal").querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter((el) => !el.disabled && el.offsetParent !== null);
+    if (!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }
+});
+
+// Themed text-input modal (replaces native prompt()). Resolves to string or null.
+function promptModal(title, initial, { multiline=false } = {}) {
+  return new Promise((resolve) => {
+    const m = $("modal");
+    const field = multiline
+      ? `<textarea id="pm-input">${escapeHtml(initial || "")}</textarea>`
+      : `<input class="editable-field" id="pm-input" value="${escapeHtml(initial || "")}" />`;
+    m.innerHTML = `<h3 id="modal-title">${escapeHtml(title)}</h3>${field}
+      <div class="actions"><button class="secondary" id="pm-cancel">Cancel</button><button id="pm-ok">OK</button></div>`;
+    let done = false;
+    const finish = (val) => { if (done) return; done = true; resolve(val); closeModal(false); };
+    openModal(() => finish(null));
+    $("pm-input").focus();
+    $("pm-cancel").onclick = () => finish(null);
+    $("pm-ok").onclick = () => { const v = $("pm-input").value; finish(v); };
+  });
+}
+function confirmModal(title, message) {
+  return new Promise((resolve) => {
+    const m = $("modal");
+    m.innerHTML = `<h3 id="modal-title">${escapeHtml(title)}</h3><p>${escapeHtml(message || "")}</p>
+      <div class="actions"><button class="secondary" id="cm-cancel">Cancel</button><button class="danger" id="cm-ok">Delete</button></div>`;
+    let done = false;
+    const finish = (val) => { if (done) return; done = true; resolve(val); closeModal(false); };
+    openModal(() => finish(false));
+    $("cm-cancel").onclick = () => finish(false);
+    $("cm-ok").onclick = () => finish(true);
+  });
+}
 
 // ---- Confirm dialog ----------------------------------------------------
 function showConfirm(d) {
   const m = $("modal");
   const p = d.preview || {};
-  let html = `<h3>${p.title || d.action}</h3>`;
-  if (p.audience) html += `<div class="audience">To: ${p.audience}</div>`;
+  let html = `<h3 id="modal-title">${d.action === "send_announcement" ? "Review & send announcement" : escapeHtml(p.title || d.action)}</h3>`;
+  if (p.audience) html += `<div class="audience">To: ${escapeHtml(p.audience)}</div>`;
   if (p.summary_lines && p.summary_lines.length)
     html += "<ul>" + p.summary_lines.map(s=>`<li>${escapeHtml(s)}</li>`).join("") + "</ul>";
-  if (p.body_markdown) html += `<div class="body">${escapeHtml(p.body_markdown)}</div>`;
+  if (p.body_markdown && d.action !== "send_announcement") html += `<div class="body">${escapeHtml(p.body_markdown)}</div>`;
   if (p.diff && p.diff.length) {
     html += `<table class="diff"><tr><th>Field</th><th>Before</th><th>After</th></tr>` +
       p.diff.map(r=>`<tr><td>${escapeHtml(r.field)}</td><td>${escapeHtml(String(r.before??"—"))}</td><td>${escapeHtml(String(r.after??"—"))}</td></tr>`).join("") +
@@ -307,32 +1034,72 @@ function showConfirm(d) {
   }
   if (p.warnings && p.warnings.length)
     html += "<ul class='warn'>" + p.warnings.map(w=>`<li>⚠ ${escapeHtml(w)}</li>`).join("") + "</ul>";
-  if (d.action === "publish_assessment")
+  if (d.action === "send_announcement") {
+    const subj = (p.title || "").replace(/^Send announcement:\s*/i, "");
+    const body = p.body_markdown || "";
+    html += `<p style="color:var(--muted);font-size:13px;margin:12px 0 8px">Edit the announcement below, then send or cancel. This is exactly what will be posted to mooKIT.</p>`;
+    html += `<div style="font-size:12px;color:var(--muted);margin-top:8px">Subject</div>`;
+    html += `<input class="editable-field" id="cf-ann-subj" value="${escapeHtml(subj)}" />`;
+    html += `<div style="font-size:12px;color:var(--muted);margin-top:10px">Body</div>`;
+    html += `<textarea class="editable-field body" id="cf-ann-body">${escapeHtml(body)}</textarea>`;
+  }
+  if (d.action === "publish_assessment") {
     html += `<p style="color:var(--muted);font-size:13px;margin:12px 0 0">This creates the quiz on mooKIT with the questions from your draft above. Review them before confirming.</p>`;
+    const diagramSummary = getDiagramAttachSummary();
+    if (diagramSummary) html += `<p style="color:var(--accent2);font-size:13px;margin:8px 0 0">${escapeHtml(diagramSummary)}</p>`;
+  }
   if (d.action === "publish_lecture")
     html += `<p style="color:var(--muted);font-size:13px;margin:12px 0 0">This uploads the video to mooKIT (if needed), creates the lecture, and attaches the video. Review the week/title above before confirming.</p>`;
   const confirmLabel = d.action === "publish_assessment" ? "Publish quiz"
-    : d.action === "publish_lecture" ? "Publish lecture" : "Confirm";
+    : d.action === "publish_lecture" ? "Publish lecture"
+    : d.action === "send_announcement" ? "Send" : "Confirm";
   html += `<div class="actions">
       <button class="secondary" id="btn-reject">Cancel</button>
       <button id="btn-confirm">${confirmLabel}</button></div>`;
   m.innerHTML = html;
-  $("overlay").classList.add("show");
-  $("btn-reject").onclick = () => resolveAction(d, false);
-  $("btn-confirm").onclick = () => resolveAction(d, true);
-  // Click dimmed backdrop to dismiss (same as Cancel)
-  $("overlay").onclick = (e) => { if (e.target === $("overlay")) resolveAction(d, false); };
+  let done = false;
+  const finish = (ok) => {
+    if (done) return;
+    if (d.action === "send_announcement" && ok) {
+      const title = ($("cf-ann-subj")?.value || "").trim();
+      const description = ($("cf-ann-body")?.value || "").trim();
+      if (!title || !description) {
+        toast("Subject and body are required", "warn");
+        return;
+      }
+    }
+    done = true;
+    closeModal(false);
+    if (d.action === "send_announcement" && ok) {
+      const title = ($("cf-ann-subj")?.value || "").trim();
+      const description = ($("cf-ann-body")?.value || "").trim();
+      resolveAction(d, true, { title, description });
+    } else {
+      resolveAction(d, ok);
+    }
+  };
+  openModal(() => finish(false));
+  $("btn-reject").onclick = () => finish(false);
+  $("btn-confirm").onclick = () => finish(true);
 }
-async function resolveAction(d, confirm) {
-  $("overlay").classList.remove("show");
-  $("overlay").onclick = null;
+async function resolveAction(d, confirm, annEdits) {
   const verb = confirm ? "confirm" : "reject";
   try {
+    if (confirm && d.action === "send_announcement" && annEdits?.title && annEdits?.description) {
+      const rr = await fetch(`${baseUrl()}/v1/actions/${d.action_id}/revise`, {
+        method: "POST",
+        headers: headers({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ title: annEdits.title, description: annEdits.description }),
+      });
+      const rj = await rr.json().catch(() => ({}));
+      if (!rr.ok) { surfaceError(rr.status, rj.detail, "revise announcement"); return; }
+    }
     const r = await fetch(`${baseUrl()}/v1/actions/${d.action_id}/${verb}`, {
       method:"POST", headers: headers({"Content-Type":"application/json"}),
       body: JSON.stringify(confirm ? { confirm_token: d.confirm_token } : {}),
     });
-    const j = await r.json();
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { surfaceError(r.status, j.detail, d.action); return; }
     const payload = j.data || j;
     if (confirm && d.action === "send_announcement" && payload && payload.title) {
       addChip(`✅ Announcement sent (id ${payload.id}): "${payload.title}"`, "artifact");
@@ -346,23 +1113,48 @@ async function resolveAction(d, confirm) {
     } else {
       addChip(confirm ? `✅ ${d.action} confirmed` : `🚫 ${d.action} cancelled`, confirm ? "artifact":"");
     }
-  } catch (e) { addChip("confirm failed: " + e.message, "err"); }
+  } catch (e) { surfaceError(0, e.message, d.action); }
 }
-function escapeHtml(s){ return s.replace(/[&<>]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
 
-function sendChatMessage(text) {
-  $("input").value = text;
-  $("chat").requestSubmit();
+function getDiagramAttachSummary() {
+  const parts = uploadedFiles
+    .filter((f) => f.diagrams?.status === "complete" && f.diagrams.total_diagrams > 0)
+    .map((f) => `${f.diagrams.total_diagrams} diagram(s) from ${f.name}`);
+  return parts.length ? parts.join("; ") + " will be attached." : "";
 }
+
+function showSourceModal(cite) {
+  const m = $("modal");
+  let html = `<h3 id="modal-title">Source citation</h3>`;
+  if (cite.source_doc_id)
+    html += `<p style="color:var(--muted);font-size:12px">Document: ${escapeHtml(lookupFileName(cite.source_doc_id))} (${escapeHtml(cite.source_doc_id)})</p>`;
+  html += `<div class="body source-modal">${escapeHtml(cite.quote || "")}</div>`;
+  html += `<div class="actions"><button id="btn-close-source">Close</button></div>`;
+  m.innerHTML = html;
+  openModal();
+  $("btn-close-source").onclick = () => closeModal(false);
+}
+
+const HIGHER_ORDER = new Set(["analyze", "evaluate", "create"]);
+function sendChatMessage(text) { $("input").value = text; $("chat").requestSubmit(); }
 
 const QUESTION_TYPES = ["mcq_single", "mcq_multi", "true_false", "fib", "descriptive"];
 
 function renderQuizQuestion(q, idx, editable) {
   const stem = q.questionText || q.stem || "(no question text)";
+  const higherOrder = HIGHER_ORDER.has(q.bloom_level);
   let html = `<div class="quiz-q" data-qidx="${idx}">`;
   html += `<div class="q-num">Question ${idx + 1} · ${escapeHtml(q.questionType || "unknown")}`;
-  if (q.bloom_level) html += ` · ${escapeHtml(q.bloom_level)}`;
+  if (q.bloom_level) html += ` · <span class="q-bloom"${higherOrder ? ' data-higher="1"' : ""}>${escapeHtml(q.bloom_level)}</span>`;
   html += `</div><div class="q-stem">${escapeHtml(stem)}</div>`;
+  if (q.diagram && q.diagram.file_id && q.diagram.diagram_file) {
+    const d = q.diagram;
+    const cap = d.description ? escapeHtml(d.description) : "Figure for this question";
+    html += `<figure class="q-diagram">
+      <img class="q-diagram-img" data-file="${escapeHtml(d.file_id)}" data-diag="${escapeHtml(d.diagram_file)}" alt="${cap}" title="${cap}">
+      <figcaption>📎 ${cap}${d.question_number ? ` · ${escapeHtml(String(d.question_number))}` : ""}</figcaption>
+    </figure>`;
+  }
   const opts = q.options || [];
   if (opts.length) {
     for (const o of opts) {
@@ -380,16 +1172,34 @@ function renderQuizQuestion(q, idx, editable) {
   }
   if (q.solution && q.solution.solution_expr)
     html += `<div class="q-meta">Worked solution: ${escapeHtml(q.solution.solution_expr)} = ${q.solution.answer}${q.solution.unit ? " " + escapeHtml(q.solution.unit) : ""}</div>`;
-  if (q.flags && q.flags.length)
-    html += `<div class="q-meta">⚠ ${escapeHtml(q.flags.join(", "))}</div>`;
+  // Descriptive rubric (if present).
+  const rubric = q.rubric || q.scoring_rubric;
+  if (rubric && (rubric.criteria || Array.isArray(rubric))) {
+    const crit = rubric.criteria || rubric;
+    if (Array.isArray(crit) && crit.length) {
+      html += `<div class="rubric"><strong>Rubric</strong><table><tr><th>Criterion</th><th>Pts</th></tr>` +
+        crit.map(c => `<tr><td>${escapeHtml(c.criterion || c.descriptor || c.name || "")}</td><td>${escapeHtml(String(c.points ?? c.score ?? ""))}</td></tr>`).join("") +
+        `</table></div>`;
+    }
+  }
+  // Marks line.
+  if (q.score != null || q.negativeScore != null) {
+    html += `<div class="q-meta">Marks: ${escapeHtml(String(q.score ?? "?"))}${q.negativeScore ? ` · negative ${escapeHtml(String(q.negativeScore))}` : ""}</div>`;
+  }
   const cite = q.citation;
-  if (cite && cite.quote)
-    html += `<div class="q-cite">Source: “${escapeHtml(String(cite.quote).slice(0, 200))}${cite.quote.length > 200 ? "…" : ""}”</div>`;
+  const nCites = Array.isArray(q.citations) ? q.citations.length : (cite ? 1 : 0);
+  if (cite && cite.quote) {
+    const docName = cite.source_doc_id ? escapeHtml(lookupFileName(cite.source_doc_id)) : "";
+    html += `<div class="q-cite">Source${docName ? ` · ${docName}` : ""}${nCites > 1 ? ` · ${nCites} spans` : ""}: “${escapeHtml(String(cite.quote).slice(0, 200))}${cite.quote.length > 200 ? "…" : ""}”`;
+    if (editable) html += ` <button type="button" data-op="view_source" style="font-size:10px;padding:2px 6px">View source</button>`;
+    html += `</div>`;
+  }
   if (editable) {
     const typeOpts = QUESTION_TYPES.map(t => `<option value="${t}"${t === q.questionType ? " selected" : ""}>${t}</option>`).join("");
     html += `<div class="q-edit-actions">
       <button data-op="edit_text">✏️ Edit text</button>
       <button data-op="regenerate">↻ Regenerate</button>
+      <button data-op="regenerate_note" title="Regenerate with a specific instruction">↻ with note…</button>
       <button data-op="replace_similar">⇄ Replace</button>
       <select data-op="change_type" title="Change type">${typeOpts}</select>
       <button data-op="flag">⚑ Flag</button>
@@ -401,7 +1211,14 @@ function renderQuizQuestion(q, idx, editable) {
   return html;
 }
 
-function attachDraftActions(card, buttons) {
+// Unambiguous publish instruction bound to a specific draft id — prevents the model from
+// publishing a different/older draft or re-creating one when several drafts exist in the session.
+function publishDraftMessage(artifactId) {
+  return `Publish the existing quiz draft with id "${artifactId}" to the course. `
+    + `Publish exactly that draft as-is — do not create a new quiz and do not change the questions.`;
+}
+
+function attachDraftActions(card, buttons, artifactId) {
   const row = document.createElement("div");
   row.className = "draft-actions";
   for (const b of buttons) {
@@ -409,7 +1226,15 @@ function attachDraftActions(card, buttons) {
     btn.type = "button";
     btn.className = b.secondary ? "secondary" : (b.danger ? "danger" : "");
     btn.textContent = b.label;
-    btn.onclick = () => sendChatMessage(b.message);
+    if (b.resource) gate(btn, b.resource, b.action);
+    if (b.directOp && artifactId) {
+      btn.onclick = () => editQuiz(card, artifactId, b.directOp, b.extra || {});
+    } else if (b.publish && artifactId) {
+      // Target THIS exact draft so the model can't publish a different/stale one.
+      btn.onclick = () => sendChatMessage(publishDraftMessage(artifactId));
+    } else if (b.message) {
+      btn.onclick = () => sendChatMessage(b.message);
+    }
     row.appendChild(btn);
   }
   card.appendChild(row);
@@ -422,22 +1247,51 @@ function draftPreviewFromPayload(title, payload) {
   return { title, warnings: (payload && payload.warnings) || [], summary_lines: [`${qs.length} question(s)`] };
 }
 
-function renderDraftCard(card, p, payload, artifactId, version) {
+function renderDraftCard(card, p, payload, artifactId, version, provenance) {
   const questions = payload.questions || [];
   const title = (p.title || "").replace(/^Publish assessment:\s*/i, "") || "Quiz draft";
   const sources = payload.source_artifact_ids || (payload.source_artifact_id ? [payload.source_artifact_id] : []);
-  let html = `<div class="draft-title">📝 Quiz draft: ${escapeHtml(title)}${version ? ` <span style="color:var(--muted);font-weight:400">v${version}</span>` : ""}</div>`;
+  const prov = provenance || payload.provenance || {};
+  const provLabel = prov.edited_by_human ? "AI-generated · edited by you" : "AI-generated";
+  const canEdit = Boolean(artifactId) && can("assessments", "update");
+  let html = `<div class="draft-title">📝 Quiz draft: ${escapeHtml(title)}${version ? ` <span style="color:var(--muted);font-weight:400">v${version}</span>` : ""}`;
+  html += `<span class="provenance-badge">${escapeHtml(provLabel)}</span></div>`;
   html += `<div style="color:var(--muted);font-size:12px;margin-bottom:10px">Review and edit each question below. Nothing is on mooKIT until you publish and confirm.</div>`;
-  if (sources.length > 1)
-    html += `<div style="color:var(--muted);font-size:12px;margin-bottom:8px">Sources: ${sources.length} documents (${escapeHtml(sources.join(", "))})</div>`;
+  if (sources.length > 1) {
+    const names = sources.map((id) => lookupFileName(id)).join(", ");
+    html += `<div style="color:var(--muted);font-size:12px;margin-bottom:8px">Sources: ${sources.length} documents — ${escapeHtml(names)}</div>`;
+  } else if (sources.length === 1) {
+    html += `<div style="color:var(--muted);font-size:12px;margin-bottom:8px">Source: ${escapeHtml(lookupFileName(sources[0]))}</div>`;
+  }
+  if (canEdit) {
+    const addTypeOpts = QUESTION_TYPES.map(t => `<option value="${t}">${t}</option>`).join("");
+    html += `<div class="draft-knobs"><label>Difficulty (whole quiz) <select id="difficulty-${artifactId}">
+      <option value="easy">easy</option><option value="medium" selected>medium</option>
+      <option value="hard">hard</option><option value="mixed">mixed</option></select></label>
+      <label>Add <select id="add-type-${artifactId}">${addTypeOpts}</select>
+      <select id="add-count-${artifactId}"><option>1</option><option>2</option><option>3</option></select></label>
+      <button type="button" class="secondary" id="add-q-${artifactId}">+ Add question(s)</button></div>`;
+  }
   if (p.summary_lines && p.summary_lines.length)
     html += "<ul style='margin:8px 0;padding-left:18px;color:var(--muted)'>" +
       p.summary_lines.map(s => `<li>${escapeHtml(s)}</li>`).join("") + "</ul>";
   if (!questions.length)
     html += `<div class="draft-body" style="color:var(--warn)">No questions in this draft yet.</div>`;
   else
-    html += questions.map((q, i) => renderQuizQuestion(q, i, Boolean(artifactId))).join("");
+    html += questions.map((q, i) => renderQuizQuestion(q, i, canEdit)).join("");
   card.innerHTML = html;
+  card._quizPayload = payload;
+  loadQuestionDiagrams(card);
+  if (canEdit) {
+    const diffSel = card.querySelector("#difficulty-" + artifactId);
+    if (diffSel) diffSel.onchange = () => editQuiz(card, artifactId, "set_difficulty", { difficulty: diffSel.value });
+    const addBtn = card.querySelector("#add-q-" + artifactId);
+    if (addBtn) addBtn.onclick = () => {
+      const qtype = card.querySelector("#add-type-" + artifactId).value;
+      const delta = Number(card.querySelector("#add-count-" + artifactId).value) || 1;
+      editQuiz(card, artifactId, "add", { qtype, delta });
+    };
+  }
   if (p.warnings && p.warnings.length) {
     const w = document.createElement("ul");
     w.style.cssText = "color:var(--warn);margin:8px 0;padding-left:18px";
@@ -445,17 +1299,25 @@ function renderDraftCard(card, p, payload, artifactId, version) {
     card.appendChild(w);
   }
   attachDraftActions(card, [
-    { label: "Publish to mooKIT", message: "Publish this quiz draft to the course" },
-    { label: "Add 2 questions", message: "Add 2 more mcq_single questions to this quiz", secondary: true },
-    { label: "Make harder", message: "Make this quiz harder — regenerate at a higher difficulty", secondary: true },
+    { label: "Publish to mooKIT", publish: true, resource: "assessments", action: "publish" },
+    { label: "Add 2 questions", directOp: "add", extra: { qtype: "mcq_single", delta: 2 }, secondary: true },
+    { label: "Make harder", directOp: "set_difficulty", extra: { difficulty: "hard" }, secondary: true },
     { label: "Keep as draft", message: "Keep it as a draft for now", secondary: true },
-  ]);
+  ], canEdit ? artifactId : null);
 }
 
 function setupQuizEditing(card, artifactId) {
   if (!artifactId || card.dataset.editingWired) return;
   card.dataset.editingWired = "1";
-  card.addEventListener("click", (e) => {
+  card.addEventListener("click", async (e) => {
+    const srcBtn = e.target.closest("button[data-op='view_source']");
+    if (srcBtn) {
+      const wrap = srcBtn.closest(".quiz-q");
+      const index = Number(wrap.getAttribute("data-qidx"));
+      const q = (card._quizPayload?.questions || [])[index];
+      if (q?.citation) showSourceModal(q.citation);
+      return;
+    }
     const btn = e.target.closest("button[data-op]");
     if (!btn) return;
     const wrap = btn.closest(".quiz-q");
@@ -464,12 +1326,15 @@ function setupQuizEditing(card, artifactId) {
     const op = btn.getAttribute("data-op");
     if (op === "edit_text") {
       const cur = wrap.querySelector(".q-stem")?.textContent || "";
-      const nt = prompt("Edit question text:", cur);
+      const nt = await promptModal("Edit question text", cur, { multiline: true });
       if (nt != null && nt.trim() && nt !== cur) editQuiz(card, artifactId, "edit_text", { index, questionText: nt });
+    } else if (op === "regenerate_note") {
+      const note = await promptModal("Regenerate this question with an instruction", "", { multiline: true });
+      if (note != null && note.trim()) editQuiz(card, artifactId, "regenerate", { index, instruction: note });
     } else if (op === "flag") {
       editQuiz(card, artifactId, "flag", { index, reason: "instructor_flag" });
     } else if (op === "remove") {
-      if (confirm("Delete question " + (index + 1) + "?")) editQuiz(card, artifactId, "remove", { index });
+      if (await confirmModal("Delete question", "Delete question " + (index + 1) + "? This cannot be undone.")) editQuiz(card, artifactId, "remove", { index });
     } else {
       editQuiz(card, artifactId, op, { index });   // regenerate | replace_similar
     }
@@ -482,6 +1347,17 @@ function setupQuizEditing(card, artifactId) {
   });
 }
 
+async function editAnnouncement(draftId, title, description) {
+  const r = await fetch(`${baseUrl()}/v1/announcement/${draftId}/edit`, {
+    method: "POST",
+    headers: headers({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ title, description }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail || r.statusText || ("HTTP " + r.status));
+  return j;
+}
+
 async function editQuiz(card, artifactId, op, extra = {}) {
   card.style.opacity = ".5";
   try {
@@ -489,16 +1365,17 @@ async function editQuiz(card, artifactId, op, extra = {}) {
       method: "POST", headers: headers({ "Content-Type": "application/json" }),
       body: JSON.stringify(Object.assign({ op }, extra)),
     });
-    const j = await r.json();
+    const j = await r.json().catch(() => ({}));
     if (!r.ok || j.success === false) {
-      addChip("edit failed: " + (j.detail || j.message || ("HTTP " + r.status)), "err");
+      surfaceError(r.status, j.detail || j.message, "quiz edit");
       return;
     }
     const payload = j.payload || {};
-    renderDraftCard(card, draftPreviewFromPayload(j.title || "Quiz draft", payload), payload, artifactId, j.version);
+    card._quizPayload = payload;
+    renderDraftCard(card, draftPreviewFromPayload(j.title || "Quiz draft", payload), payload, artifactId, j.version, j.provenance);
     addChip(`✏️ ${op} applied (v${j.version})`, "artifact");
   } catch (e) {
-    addChip("edit failed: " + e.message, "err");
+    surfaceError(0, e.message, "quiz edit");
   } finally {
     card.style.opacity = "";
   }
@@ -509,8 +1386,8 @@ function showArtifactPreview(p, type, payload, artifactId, version) {
   card.className = "msg assistant draft-preview";
   let html = "";
   if (type === "assessment_draft" && payload) {
-    setupQuizEditing(card, artifactId);   // delegated per-question edit handlers (attached once)
-    renderDraftCard(card, p, payload, artifactId, version);
+    setupQuizEditing(card, artifactId);
+    renderDraftCard(card, p, payload, artifactId, version, payload.provenance);
     log.appendChild(card);
     scrollLog();
     return;
@@ -519,6 +1396,8 @@ function showArtifactPreview(p, type, payload, artifactId, version) {
     const title = payload.title || p.title || "Lecture draft";
     html += `<div class="draft-title">🎬 Lecture draft: ${escapeHtml(title)}</div>`;
     html += `<div style="color:var(--muted);font-size:12px;margin-bottom:10px">Nothing is on mooKIT until you publish and confirm. The video is uploaded to mooKIT at confirm time.</div>`;
+    if (payload.ambiguous)
+      html += `<div class="draft-body" style="color:var(--warn)">⚠ The week “${escapeHtml(payload.week_label||"")}” wasn't matched to a course week — tell me which week before publishing.</div>`;
     if (p.summary_lines && p.summary_lines.length)
       html += "<ul style='margin:8px 0;padding-left:18px;color:var(--muted)'>" +
         p.summary_lines.map(s => `<li>${escapeHtml(s)}</li>`).join("") + "</ul>";
@@ -531,34 +1410,62 @@ function showArtifactPreview(p, type, payload, artifactId, version) {
       html += `<div class="draft-body"><strong>Week:</strong> ${escapeHtml(payload.week_label)}</div>`;
     if (payload.module_label)
       html += `<div class="draft-body" style="margin-top:8px"><strong>Module:</strong> ${escapeHtml(payload.module_label)}</div>`;
-    if (payload.file_artifact_id)
-      html += `<div style="font-size:12px;color:var(--muted);margin-top:8px">Video file id: <code>${escapeHtml(payload.file_artifact_id)}</code></div>`;
+    if (payload.file_artifact_id) {
+      const vidName = lookupFileName(payload.file_artifact_id);
+      html += `<div style="font-size:12px;color:var(--muted);margin-top:8px">Video: <strong>${escapeHtml(vidName)}</strong> <code>${escapeHtml(payload.file_artifact_id)}</code></div>`;
+      const vidFile = uploadedFiles.find((f) => f.id === payload.file_artifact_id);
+      if (vidFile?.localBlobUrl) {
+        html += `<div class="video-preview"><video controls src="${vidFile.localBlobUrl}"></video></div>`;
+      }
+    }
     card.innerHTML = html;
     attachDraftActions(card, [
-      { label: "Publish lecture to mooKIT", message: "Publish this lecture draft to the course" },
+      { label: "Publish lecture to mooKIT", message: "Publish this lecture draft to the course", resource: "lectures", action: "create" },
       { label: "Change week/title", message: "Change the week or title for this lecture draft", secondary: true },
       { label: "Keep as draft", message: "Keep it as a draft for now", secondary: true },
-    ]);
+    ], null);
     log.appendChild(card);
     scrollLog();
     return;
   }
   if (type === "announcement_draft" && payload) {
     html += `<div class="draft-title">📋 Draft announcement</div>`;
-    html += `<div style="color:var(--muted);font-size:12px;margin-bottom:10px">This is exactly what will be posted to mooKIT if you confirm send.</div>`;
+    html += `<div style="color:var(--muted);font-size:12px;margin-bottom:10px">Edit the subject/body below, then send. This is exactly what will be posted to mooKIT if you confirm.</div>`;
     if (p.audience) html += `<div class="audience">To: ${escapeHtml(p.audience)}</div>`;
-    if (p.summary_lines && p.summary_lines.length)
-      html += "<ul style='margin:8px 0;padding-left:18px;color:var(--muted)'>" +
-        p.summary_lines.map(s => `<li>${escapeHtml(s)}</li>`).join("") + "</ul>";
     html += `<div style="font-size:12px;color:var(--muted);margin-top:8px">Subject (mooKIT <code>title</code>)</div>`;
-    html += `<div class="draft-body">${escapeHtml(payload.title || "")}</div>`;
+    html += `<input class="editable-field" id="ann-subject-${artifactId||'x'}" value="${escapeHtml(payload.title || "")}" />`;
     html += `<div style="font-size:12px;color:var(--muted);margin-top:10px">Body (mooKIT <code>description</code>)</div>`;
-    html += `<div class="draft-body">${escapeHtml(payload.description || "")}</div>`;
+    html += `<textarea class="editable-field body" id="ann-body-${artifactId||'x'}">${escapeHtml(payload.description || "")}</textarea>`;
     card.innerHTML = html;
+    const subjEl = card.querySelector(`#ann-subject-${artifactId||'x'}`);
+    const bodyEl = card.querySelector(`#ann-body-${artifactId||'x'}`);
     attachDraftActions(card, [
-      { label: "Send to students", message: "Yes, send the announcement to all students" },
+      { label: "Send to students", resource: "announcements", action: "publish" },
+      { label: "Save edits", secondary: true },
       { label: "Keep as draft", message: "Keep it as a draft for now", secondary: true },
-    ]);
+    ], null);
+    const btns = [...card.querySelectorAll(".draft-actions button")];
+    const sendBtn = btns[0];
+    const saveBtn = btns[1];
+    gate(sendBtn, "announcements", "publish");
+    sendBtn.onclick = async () => {
+      if (!artifactId) { sendChatMessage("Yes, send the announcement to all students"); return; }
+      try {
+        sendBtn.disabled = true;
+        await editAnnouncement(artifactId, subjEl.value.trim(), bodyEl.value.trim());
+        sendChatMessage("Yes, send the announcement to all students");
+      } catch (e) { surfaceError(0, e.message, "save announcement"); }
+      finally { sendBtn.disabled = false; }
+    };
+    saveBtn.onclick = async () => {
+      if (!artifactId) return;
+      try {
+        saveBtn.disabled = true;
+        const j = await editAnnouncement(artifactId, subjEl.value.trim(), bodyEl.value.trim());
+        addChip(`✏️ announcement saved (v${j.version})`, "artifact");
+      } catch (e) { surfaceError(0, e.message, "save announcement"); }
+      finally { saveBtn.disabled = false; }
+    };
     log.appendChild(card);
     scrollLog();
     return;
@@ -580,6 +1487,90 @@ function showArtifactPreview(p, type, payload, artifactId, version) {
 }
 
 // ---- Chat (SSE over fetch streaming) -----------------------------------
+async function loadMeta() {
+  const banner = $("meta-banner");
+  try {
+    const r = await fetch(baseUrl() + "/v1/meta", { headers: headers() });
+    if (!r.ok) {
+      if (r.status === 401) {
+        banner.innerHTML = '<span class="badge warn">Missing course / token / uid — fill header fields</span>';
+        banner.classList.add("show");
+      }
+      return;
+    }
+    const st = await r.json();
+    appMeta = st.data || st;
+    const qf = appMeta.quizFeatures || {};
+    const maxMb = Math.round((appMeta.limits?.maxFileSizeBytes || 0) / (1024 * 1024));
+    const mode = qf.blueprintEnabled ? "Blueprint pipeline" : "Legacy pipeline";
+    const badges = [
+      `<span class="badge${qf.blueprintEnabled ? " on" : ""}">${mode}</span>`,
+      qf.blueprintEnabled && qf.visionEnabled ? '<span class="badge on">Vision</span>' : "",
+      maxMb ? `<span class="badge">Max upload ${maxMb} MB</span>` : "",
+    ];
+    if (appMeta.permissionsOk === false) {
+      badges.push(`<span class="badge warn">No mooKIT permissions — check course (${escapeHtml(appMeta.courseId || "?")}), token, uid (${appMeta.userId ?? "?"})</span>`);
+    } else if (appMeta.permissions) {
+      const allowed = Object.keys(appMeta.permissions).filter((k) => (appMeta.permissions[k] || []).length).join(", ");
+      if (allowed) badges.push(`<span class="badge">Allowed: ${escapeHtml(allowed)}</span>`);
+    }
+    banner.innerHTML = badges.filter(Boolean).join(" ");
+    banner.classList.add("show");
+  } catch (_) { /* non-fatal */ }
+}
+
+// ---- Empty-state onboarding -------------------------------------------------
+const EXAMPLE_PROMPTS = [
+  "Create a 5-question quiz on photosynthesis",
+  "Draft an announcement that today's class is cancelled",
+  "What can you help me with?",
+];
+function renderEmptyState() {
+  if (log.children.length) return;
+  const e = document.createElement("div");
+  e.id = "empty";
+  e.innerHTML = `<h2>How can I help with your course?</h2>
+    <div>Upload a document to make a quiz, draft an announcement, or publish a lecture — I always preview before anything is sent.</div>
+    <div class="examples"></div>`;
+  log.appendChild(e);
+  const ex = e.querySelector(".examples");
+  for (const p of EXAMPLE_PROMPTS) {
+    const b = document.createElement("button");
+    b.textContent = p;
+    b.onclick = () => sendChatMessage(p);
+    ex.appendChild(b);
+  }
+}
+
+// ---- Session lifecycle ------------------------------------------------------
+function persistCfg() {
+  localStorage.setItem("mookit-ui-cfg", JSON.stringify({
+    base: $("cfg-base").value.trim(), course: $("cfg-course").value.trim(),
+    uid: $("cfg-uid").value.trim(), token: $("cfg-token").value.trim(), sessionId,
+  }));
+}
+function newSession() {
+  sessionId = "sess-" + Math.random().toString(36).slice(2);
+  log.innerHTML = "";
+  uploadedFiles.forEach((f) => f.localBlobUrl && URL.revokeObjectURL(f.localBlobUrl));
+  uploadedFiles = []; offeredActionsKey = ""; $("file-list").innerHTML = "";
+  draftArtifacts = []; pendingRefs = [];
+  renderRefChips(); renderArtifactsPanel();
+  updateFilesPanelSummary(); persistCfg(); renderEmptyState();
+}
+async function restoreSession() {
+  try {
+    const r = await fetch(baseUrl() + "/v1/sessions/" + encodeURIComponent(sessionId), { headers: headers() });
+    if (!r.ok) { renderEmptyState(); return; }
+    const st = await r.json();
+    const data = st.data || st;
+    const msgs = data.messages || [];
+    if (!msgs.length) { renderEmptyState(); return; }
+    for (const m of msgs) addMsg(m.role === "user" ? "user" : "assistant", m.content || "");
+    addChip("↺ restored " + msgs.length + " message(s) from this session", "");
+  } catch (_) { renderEmptyState(); }
+}
+
 (function initConfig() {
   const params = new URLSearchParams(location.search);
   let saved = {};
@@ -595,32 +1586,43 @@ function showArtifactPreview(p, type, payload, artifactId, version) {
   if (saved.uid) $("cfg-uid").value = saved.uid;
   const token = params.get("token") || saved.token || "";
   if (token) $("cfg-token").value = token;
-  function persist() {
-    localStorage.setItem("mookit-ui-cfg", JSON.stringify({
-      base: $("cfg-base").value.trim(),
-      course: $("cfg-course").value.trim(),
-      uid: $("cfg-uid").value.trim(),
-      token: $("cfg-token").value.trim(),
-    }));
-  }
+  sessionId = saved.sessionId || ("sess-" + Math.random().toString(36).slice(2));
   ["cfg-base", "cfg-course", "cfg-uid", "cfg-token"].forEach((id) => {
-    $(id).addEventListener("change", persist);
-    $(id).addEventListener("input", persist);
+    $(id).addEventListener("change", () => { persistCfg(); loadMeta(); });
+    $(id).addEventListener("input", persistCfg);
   });
+  $("new-session").onclick = newSession;
+  persistCfg();
+  loadMeta().then(() => restoreSession());
 })();
 
 function parseSseFrames(buffer) {
-  // sse-starlette terminates frames with CRLF (\\r\\n\\r\\n). Normalise first.
   const norm = buffer.replace(/\r\n/g, "\n");
   const parts = norm.split("\n\n");
   const rest = parts.pop() || "";
   return { frames: parts.filter(Boolean), rest };
 }
 
+// Coalesce repeated tool chips (keyed by tool) so progress doesn't flood the log.
+function upsertToolChip(state, tool, text) {
+  let chip = state.toolChips[tool];
+  if (!chip || !chip.isConnected) { chip = addChip(text, "tool"); state.toolChips[tool] = chip; }
+  else chip.textContent = text;
+}
+
+function addSkeleton() {
+  clearEmptyState();
+  const el = document.createElement("div");
+  el.className = "msg assistant skeleton";
+  el.innerHTML = `<div class="bar"></div><div class="bar"></div><div class="bar short"></div>`;
+  log.appendChild(el); scrollLog();
+  return el;
+}
+
 function handleSseFrame(frame, state) {
   let ev = "message", data = "";
   for (const line of frame.split("\n")) {
-    if (!line || line.startsWith(":")) continue; // comment / ping line
+    if (!line || line.startsWith(":")) continue;
     if (line.startsWith("event:")) ev = line.slice(6).trim();
     else if (line.startsWith("data:")) data += (data ? "\n" : "") + line.slice(5).trim();
   }
@@ -628,56 +1630,92 @@ function handleSseFrame(frame, state) {
   let d;
   try { d = JSON.parse(data); } catch (err) {
     console.warn("SSE JSON parse failed", data, err);
-    addChip("parse error: " + data.slice(0, 80), "err");
     return;
   }
   if (ev === "assistant_delta") {
-    if (!state.assistantEl) state.assistantEl = addMsg("assistant", "");
-    state.assistantEl.textContent += d.text || "";
+    if (state.skeletonEl) { state.skeletonEl.remove(); state.skeletonEl = null; }
+    if (!state.assistantEl) { state.assistantEl = addMsg("assistant", ""); state.assistantRaw = ""; }
+    state.assistantRaw += d.text || "";
+    setAssistantText(state.assistantEl, state.assistantRaw);
     scrollLog();
   } else if (ev === "tool_started") {
-    addChip("🔧 " + (d.label || d.tool), "tool");
+    if (!state.skeletonEl && /quiz|assessment|announcement|lecture|draft|create/i.test(d.tool || d.label || "")) state.skeletonEl = addSkeleton();
+    upsertToolChip(state, d.tool || "tool", "🔧 " + (d.label || d.tool));
   } else if (ev === "tool_progress") {
-    addChip(`… ${d.tool}: ${d.message || (d.pct+"%")}`, "tool");
+    upsertToolChip(state, d.tool || "tool", `… ${d.tool}: ${d.message || (d.pct+"%")}`);
   } else if (ev === "artifact_updated") {
+    if (state.skeletonEl) { state.skeletonEl.remove(); state.skeletonEl = null; }
     state.lastArtifactType = d.type;
     state.lastArtifactId = d.artifact_id;
+    if (String(d.type || "").endsWith("_draft")) upsertDraftArtifact(d);
     addChip(`📝 ${d.type} updated (v${d.version})`, "artifact");
     if (d.preview) showArtifactPreview(d.preview, d.type, d.payload, d.artifact_id, d.version);
   } else if (ev === "pending_confirmation") {
+    if (state.skeletonEl) { state.skeletonEl.remove(); state.skeletonEl = null; }
     showConfirm(d);
+  } else if (ev === "clarification") {
+    if (state.skeletonEl) { state.skeletonEl.remove(); state.skeletonEl = null; }
+    state.sawClarification = true;
+    showClarification(d);
   } else if (ev === "error") {
-    addChip(`error: ${d.message || d.code || JSON.stringify(d)}`, "err");
+    if (state.skeletonEl) { state.skeletonEl.remove(); state.skeletonEl = null; }
+    surfaceError(0, d.message || d.code || JSON.stringify(d), "assistant");
   } else if (ev === "done") {
-    if (!state.sawDone) {
-      state.sawDone = true;
-      addChip("✓ turn complete", "");
-    }
+    if (state.skeletonEl) { state.skeletonEl.remove(); state.skeletonEl = null; }
+    if (!state.sawDone) { state.sawDone = true; addChip("✓ turn complete", ""); }
   }
 }
 
+// ---- Wire @-mention + artifacts panel --------------------------------------
+$("artifacts-toggle").onclick = () => {
+  const list = $("artifacts-list");
+  const open = list.classList.toggle("show");
+  $("artifacts-toggle").setAttribute("aria-expanded", String(open));
+};
+$("input").addEventListener("input", showMentionPop);
+$("input").addEventListener("keydown", (e) => {
+  const pop = $("mention-pop");
+  if (!pop.classList.contains("show") || !pop._cands || !pop._cands.length) return;
+  if (e.key === "ArrowDown") { e.preventDefault(); mentionActive = (mentionActive + 1) % pop._cands.length; highlightMention(); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); mentionActive = (mentionActive - 1 + pop._cands.length) % pop._cands.length; highlightMention(); }
+  else if (e.key === "Enter" || e.key === "Tab") { if (mentionActive >= 0) { e.preventDefault(); pickMention(pop._cands[mentionActive].id); } }
+  else if (e.key === "Escape") { e.preventDefault(); hideMentionPop(); }
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("#mention-pop") && e.target !== $("input")) hideMentionPop();
+});
+renderArtifactsPanel();
+
 $("chat").onsubmit = async (e) => {
   e.preventDefault();
+  hideMentionPop();
   const text = $("input").value.trim();
-  if (!text) return;
+  const refs = pendingRefs.slice();
+  if (!text && !refs.length) return;
   if (!$("cfg-token").value.trim()) {
-    addChip("missing JWT — paste your mooKIT token in the header field (or ?token=… in the URL)", "err");
+    surfaceError(401, null, "chat");
     return;
   }
   $("input").value = "";
+  // Readable echo of what was explicitly tagged; the references[] array is authoritative.
+  const displayText = refs.length
+    ? (text + (text ? "\n\n" : "") + "(@-tagged: " + refs.map((r) => r.title).join(", ") + ")")
+    : text;
+  lastUserText = text;
+  pendingRefs = []; renderRefChips(); renderArtifactsPanel();
   $("send").disabled = true;
   $("cancel").style.display = "";
   chatAbort = new AbortController();
-  addMsg("user", text);
-  const state = { assistantEl: null, sawDone: false, lastArtifactType: null, lastArtifactId: null };
+  addMsg("user", displayText);
+  const state = { assistantEl: null, assistantRaw: "", skeletonEl: null, sawDone: false, lastArtifactType: null, lastArtifactId: null, toolChips: {} };
 
   try {
     const r = await fetch(baseUrl() + "/v1/chat", {
       method:"POST", headers: headers({"Content-Type":"application/json"}),
-      body: JSON.stringify({ message: text, sessionId }),
+      body: JSON.stringify({ message: displayText, sessionId, references: refs.map((r) => r.id) }),
       signal: chatAbort.signal,
     });
-    if (!r.ok) { addChip(`HTTP ${r.status}: ${await r.text()}`, "err"); $("send").disabled=false; return; }
+    if (!r.ok) { let detail=""; try{ detail=(await r.json()).detail; }catch{ detail=await r.text().catch(()=>"" ); } surfaceError(r.status, detail, "chat"); return; }
     const reader = r.body.getReader();
     const dec = new TextDecoder();
     let buf = "";
@@ -693,21 +1731,24 @@ $("chat").onsubmit = async (e) => {
       const parsed = parseSseFrames(buf + "\n\n");
       for (const frame of parsed.frames) handleSseFrame(frame, state);
     }
-    if (!state.assistantEl) addChip("(no assistant text — check tool chips above)", "");
+    if (!state.assistantEl && !state.sawClarification) addChip("(no assistant text — check tool chips above)", "");
     if (state.lastArtifactType === "assessment_draft") {
+      const publishMsg = state.lastArtifactId
+        ? publishDraftMessage(state.lastArtifactId)
+        : "Publish this quiz draft to the course";
       addQuickActions([
-        { label: "Publish quiz to mooKIT", message: "Publish this quiz draft to the course" },
+        { label: "Publish quiz to mooKIT", message: publishMsg, resource: "assessments", action: "publish" },
         { label: "Add 2 more questions", message: "Add 2 more mcq_single questions to this quiz", secondary: true },
         { label: "Keep as draft", message: "Keep it as a draft for now", secondary: true },
       ]);
     } else if (state.lastArtifactType === "lecture_draft") {
       addQuickActions([
-        { label: "Publish lecture to mooKIT", message: "Publish this lecture draft to the course" },
+        { label: "Publish lecture to mooKIT", message: "Publish this lecture draft to the course", resource: "lectures", action: "create" },
         { label: "Keep as draft", message: "Keep it as a draft for now", secondary: true },
       ]);
     } else if (state.lastArtifactType === "announcement_draft") {
       addQuickActions([
-        { label: "Yes — send announcement", message: "Yes, send the announcement to all students" },
+        { label: "Yes — send announcement", message: "Yes, send the announcement to all students", resource: "announcements", action: "publish" },
         { label: "Keep as draft", message: "Keep it as a draft for now", secondary: true },
       ]);
     }
@@ -719,7 +1760,7 @@ $("chat").onsubmit = async (e) => {
       if (msg === "Failed to fetch") {
         msg = "cannot reach " + baseUrl() + " — use this page's host in Service URL (not localhost) and ensure the API container is running";
       }
-      addChip("stream error: " + msg, "err");
+      surfaceError(0, msg, "chat");
     }
   } finally {
     chatAbort = null;
@@ -729,9 +1770,7 @@ $("chat").onsubmit = async (e) => {
   }
 };
 
-$("cancel").onclick = () => {
-  if (chatAbort) chatAbort.abort();
-};
+$("cancel").onclick = () => { if (chatAbort) chatAbort.abort(); };
 </script>
 </body>
 </html>

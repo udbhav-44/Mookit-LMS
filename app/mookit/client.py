@@ -60,16 +60,25 @@ class _CircuitBreaker:
         if self._failures >= self._fail_max:
             self._state = "open"
 
-    async def call(self, coro):
+    async def call(self, coro_factory: "Callable[[], Any]", *, record: bool = True):
+        """Run `coro_factory()` under the breaker.
+
+        `coro_factory` is a zero-arg callable returning a coroutine — NOT a coroutine — so
+        that when the breaker is open we never create (and then orphan) an un-awaited
+        coroutine. `record=False` lets best-effort calls fail without tripping the breaker
+        that guards the critical write path, while still fast-failing when it is already open.
+        """
         self._transition()
         if self._state == "open":
             raise CircuitOpenError("mooKIT")
         try:
-            result = await coro
-            self.record_success()
+            result = await coro_factory()
+            if record:
+                self.record_success()
             return result
         except (MooKitRateLimitError, MooKitServerError, httpx.HTTPError):
-            self.record_failure()
+            if record:
+                self.record_failure()
             raise
         except Exception:
             # Non-retryable errors (auth, 404) don't trip the breaker
@@ -146,6 +155,7 @@ class MooKitClient(IMooKitClient):
         json: dict | None = None,
         params: dict | None = None,
         files: dict | None = None,
+        best_effort: bool = False,
     ) -> Any:
         """Send a request to mooKIT, unwrap the envelope, raise typed errors.
 
@@ -210,7 +220,9 @@ class MooKitClient(IMooKitClient):
 
             return data.get("data")
 
-        return await self._breaker.call(_request())
+        # Pass the factory (not a coroutine) so an open breaker never orphans a coroutine.
+        # best_effort calls don't trip the breaker that guards the critical write path.
+        return await self._breaker.call(_request, record=not best_effort)
 
     # ------------------------------------------------------------------
     # Users / Permissions / Taxonomy
@@ -285,13 +297,16 @@ class MooKitClient(IMooKitClient):
         files: dict,
         entity_type: str | None = None,
         entity_id: int = 0,
+        best_effort: bool = False,
     ) -> list[ManagedFile]:
         params: dict = {}
         if entity_type:
             params["entityType"] = entity_type
         if entity_id:
             params["entityId"] = entity_id
-        data = await self.call(ctx, "POST", "/files/add", files=files, params=params)
+        data = await self.call(
+            ctx, "POST", "/files/add", files=files, params=params, best_effort=best_effort
+        )
         items = data if isinstance(data, list) else [data]
         return [ManagedFile(**item) for item in items]
 
@@ -361,7 +376,8 @@ class FakeMooKitClient(IMooKitClient):
         return {"id": announcement_id}
 
     async def upload_file(self, ctx: RequestContext, files: dict,
-                          entity_type: str | None = None, entity_id: int = 0) -> list[ManagedFile]:
+                          entity_type: str | None = None, entity_id: int = 0,
+                          best_effort: bool = False) -> list[ManagedFile]:
         return [ManagedFile(id=1, fileUrl="https://example.com/f.pdf",
                             filemime="application/pdf", filesize=1024, filename="f.pdf")]
 

@@ -115,7 +115,9 @@ class DeterministicExecutor:
                 or payload.get("source_artifact_ids")
                 or []
             )
-            diagram_file_ids = await self._upload_diagrams_for_assessment(ctx, source_ids, assessment_id)
+            diagram_file_ids = await self._upload_diagrams_for_assessment(
+                ctx, atype, source_ids, assessment_id
+            )
 
             # mooKIT requires questions to live under a section; create one, then add questions to it.
             section = await self.mookit.create_section(
@@ -141,13 +143,17 @@ class DeterministicExecutor:
         return created
 
     async def _upload_diagrams_for_assessment(
-        self, ctx: RequestContext, source_ids: list[str], assessment_id: Any
+        self, ctx: RequestContext, atype: str, source_ids: list[str], assessment_id: Any
     ) -> "dict[str, int]":
         """Return {question_text: mooKIT_file_id} for every diagram linked to the source docs.
 
         Uploads each cropped diagram PNG to mooKIT /files/add scoped to the new assessment so
         it is stored as a managed file and its integer id can be passed to QuestionCreate.fileIds.
         Failures are non-fatal — a missing diagram never blocks question creation.
+
+        `entityType` must be the concrete assessment type (`quizzes`/`exams`/`assignments`);
+        mooKIT has no generic `assessments` upload entity, so the literal string is rejected by
+        its upload middleware as an unexpected multipart field (HTTP 500 "Unexpected field").
         """
         if not self._redis or not source_ids:
             return {}
@@ -168,8 +174,11 @@ class DeterministicExecutor:
                         managed = await self.mookit.upload_file(
                             ctx,
                             {"files": (info.diagram_file, f, "image/png")},
-                            entity_type="assessments",
+                            entity_type=atype,
                             entity_id=int(assessment_id),
+                            # Diagrams are non-fatal: a flaky upload endpoint must not trip the
+                            # circuit breaker and block the mandatory create/publish calls below.
+                            best_effort=True,
                         )
                     if managed:
                         result[info.question_text] = managed[0].id
@@ -203,16 +212,32 @@ class DeterministicExecutor:
         """Resolve an audience intent label to sectionIds. 'all'/empty → None (all students).
 
         Named sections are resolved via the section taxonomy server-side — never from model text.
+
+        Safety: if the instructor targeted a *specific* section but it cannot be verified (lookup
+        failure) or does not match any course section, we RAISE rather than fall back to "all
+        students". Silently broadcasting to the whole course on a typo or a transient error is a
+        far worse failure than refusing the send.
         """
-        if not intent or intent.strip().lower() in {"all", "everyone", "all students"}:
+        if not intent or intent.strip().lower() in {"all", "everyone", "all students", "all_students"}:
             return None
         try:
             terms = await self.mookit.list_taxonomy(ctx, "section")
-        except Exception:
-            return None
+        except Exception as exc:
+            raise ValueError(
+                f"Couldn't verify the target audience '{intent}' (section lookup failed). "
+                "Refusing to broadcast to all students by mistake — try again, or send to "
+                "'all students' explicitly if that's the intent."
+            ) from exc
         norm = " ".join(intent.lower().split())
         matched = [t.id for t in terms if " ".join(t.name.lower().split()) == norm]
-        return matched or None
+        if not matched:
+            available = ", ".join(t.name for t in terms) or "(none)"
+            raise ValueError(
+                f"Audience '{intent}' didn't match any course section, so this was NOT sent "
+                f"(refusing to broadcast to everyone by mistake). Available sections: {available}. "
+                "Pick a valid section or say 'all students'."
+            )
+        return matched
 
     # ------------------------------------------------------------------
     # Lecture (mooKIT video flow):

@@ -32,6 +32,26 @@ async def test_create_quiz_makes_draft(ctx) -> None:
     assert draft and len(draft.payload["questions"]) == 3
 
 
+async def test_create_quiz_requires_count_no_silent_default(ctx) -> None:
+    reg = InMemoryArtifactRegistry()
+    tool = CreateQuizTool(_pipeline(), reg)
+    res = await tool.run(ctx, {"doc_artifact_id": "doc-1", "title": "Quiz"})
+    assert isinstance(res, ToolResult)
+    assert res.ok is False
+    assert res.error and res.error.code == "count_required"
+
+
+async def test_create_quiz_replicate_unavailable_without_seams(ctx) -> None:
+    reg = InMemoryArtifactRegistry()
+    tool = CreateQuizTool(_pipeline(), reg)  # base pipeline has no replicator seam
+    res = await tool.run(
+        ctx, {"doc_artifact_id": "doc-1", "title": "Quiz", "mode": "replicate"}
+    )
+    assert isinstance(res, ToolResult)
+    assert res.ok is False
+    assert res.error and res.error.code == "replicate_unavailable"
+
+
 async def test_publish_proposes_never_executes(ctx) -> None:
     reg = InMemoryArtifactRegistry()
     aid = await _make_draft(ctx, reg)

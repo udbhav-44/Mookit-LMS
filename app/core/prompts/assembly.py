@@ -30,16 +30,22 @@ def build_input(
     manifest: str | None,
     transcript: list[Message],
     user_turn: str,
+    references_block: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Assemble the Responses ``input`` list with variable content ordered manifest → transcript → user.
+    """Assemble the Responses ``input`` list with variable content ordered manifest → references →
+    transcript → user.
 
     The system prompt and tool schemas are supplied separately (instructions/tools) as the stable
-    cache prefix and are intentionally NOT part of this list.
+    cache prefix and are intentionally NOT part of this list. ``references_block`` holds the artifacts
+    the instructor explicitly @-tagged this turn and sits right after the read-only manifest so it
+    outranks the transcript and user turn in the instruction hierarchy.
     """
     items: list[dict[str, Any]] = []
     if manifest:
         # Injected as a developer message so it sits above the user turn in the instruction hierarchy.
         items.append(_message_dict("developer", f"CURRENT ARTIFACTS (read-only context):\n{manifest}"))
+    if references_block:
+        items.append(_message_dict("developer", references_block))
     for msg in transcript:
         role = msg.role if msg.role in {"user", "assistant", "developer", "system"} else "user"
         items.append(_message_dict(role, msg.content))

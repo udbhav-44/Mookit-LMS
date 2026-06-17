@@ -108,7 +108,7 @@ class FakeMooKitClient(MooKitClient):
         self._record("update_announcement", announcement_id=announcement_id, body=body)
         return {"id": announcement_id}
 
-    async def upload_file(self, ctx, files, entity_type=None, entity_id=0) -> list[ManagedFile]:
+    async def upload_file(self, ctx, files, entity_type=None, entity_id=0, best_effort=False) -> list[ManagedFile]:
         self._record("upload_file", entity_type=entity_type, entity_id=entity_id)
         return [ManagedFile(id=self._mint(), fileUrl="https://files/test", filemime="video/mp4", filesize=1024, filename="v.mp4")]
 

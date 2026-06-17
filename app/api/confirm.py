@@ -14,7 +14,7 @@ Security chain enforced on /confirm:
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..auth.permissions import require_action_permission
 from ..contracts.context import RequestContext
@@ -29,6 +29,11 @@ router = APIRouter()
 
 class ConfirmBody(BaseModel):
     confirm_token: str
+
+
+class ReviseAnnouncementBody(BaseModel):
+    title: str = Field(min_length=1)
+    description: str = Field(min_length=1)
 
 
 @router.post("/actions/{action_id}/confirm")
@@ -120,3 +125,55 @@ async def reject_action(
         action_id, action.action, ctx.tenant_key, ctx.user_id,
     )
     return {"success": True, "message": f"Action {action_id} rejected."}
+
+
+@router.post("/actions/{action_id}/revise")
+async def revise_action(
+    action_id: str,
+    body: ReviseAnnouncementBody,
+    request: Request,
+    ctx: RequestContext = Depends(get_request_context),
+):
+    """Apply instructor edits to a pending send_announcement before confirm.
+
+    Updates the stored payload + content_hash + preview so the confirm step still
+    executes exactly what the instructor reviewed in the modal.
+    """
+    if not ctx.permissions.has_permission("announcements", "publish"):
+        raise HTTPException(status_code=403, detail="Missing announcements:publish permission.")
+
+    gate = ConfirmationGate(request.app.state.session_factory)
+    revised = await gate.revise_announcement(
+        action_id,
+        ctx.tenant_key,
+        title=body.title,
+        description=body.description,
+    )
+    if revised is None:
+        raise HTTPException(status_code=404, detail="Pending announcement action not found.")
+
+    draft_id = (revised.target_ref or {}).get("draft_id")
+    registry = getattr(request.app.state, "artifact_registry", None)
+    if draft_id and registry is not None:
+        from ..gen.provenance import mark_edited
+
+        art = await registry.get(ctx, draft_id)
+        if art is not None and art.type == "announcement_draft":
+            payload = dict(art.payload)
+            payload["title"] = body.title.strip()
+            payload["description"] = revised.payload.get("description", body.description)
+            await registry.update(
+                ctx,
+                draft_id,
+                {
+                    "title": payload["title"],
+                    "payload": payload,
+                    "provenance": mark_edited(art.provenance),
+                },
+            )
+
+    return {
+        "success": True,
+        "preview": revised.preview_json,
+        "content_hash": revised.content_hash,
+    }

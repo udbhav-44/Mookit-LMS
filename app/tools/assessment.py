@@ -12,7 +12,7 @@ publish via PUT (published.status=1). The tool only describes the payload; the g
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -59,7 +59,12 @@ class CreateQuizArgs(BaseModel):
     doc_artifact_id: str | None = None
     doc_artifact_ids: list[str] = []
     title: str
-    count: int = 5
+    # "generate" = author fresh grounded questions (requires a known count).
+    # "replicate" = reproduce an uploaded question paper VERBATIM (count comes from the paper).
+    mode: Literal["generate", "replicate"] = "generate"
+    # Number of questions to generate. REQUIRED for mode="generate"; ignored for "replicate".
+    # Never assume a default — determine it from the instructor's request, or ask via ask_user.
+    count: int | None = None
     bloom_level: str = "understand"
     difficulty: str = "medium"
 
@@ -67,8 +72,11 @@ class CreateQuizArgs(BaseModel):
 class CreateQuizTool(Tool):
     name = "create_quiz"
     description = (
-        "Generate a grounded, cited quiz draft from one or more uploaded documents. "
-        "Pass a single doc_artifact_id OR a list in doc_artifact_ids."
+        "Create a quiz draft from one or more uploaded documents. mode='generate' authors fresh "
+        "grounded questions and REQUIRES a 'count' you derived from the instructor's request (do "
+        "not guess — use ask_user if unknown). mode='replicate' reproduces an uploaded question "
+        "paper verbatim, using however many questions the paper contains. Pass a single "
+        "doc_artifact_id OR a list in doc_artifact_ids."
     )
     risk_tier = "draft"
     parameters_schema = strict_schema(CreateQuizArgs)
@@ -90,6 +98,44 @@ class CreateQuizTool(Tool):
                 error=ErrorInfo(
                     code="missing_doc",
                     message="Provide doc_artifact_id or doc_artifact_ids.",
+                ),
+            )
+
+        if parsed.mode == "replicate":
+            if not self._pipeline.replicate_enabled:
+                return ToolResult(
+                    ok=False,
+                    message="Verbatim replication isn't available for this source.",
+                    error=ErrorInfo(
+                        code="replicate_unavailable",
+                        message=(
+                            "The source can't be rendered for verbatim transcription. Ask the "
+                            "instructor how many questions to generate instead (mode='generate')."
+                        ),
+                    ),
+                )
+            draft = await self._pipeline.build_replica(
+                ctx, self._registry, doc_artifact_id=doc_ids, title=parsed.title
+            )
+            n = len(draft.payload.get("questions", []))
+            return ToolResult(
+                ok=True,
+                artifact_id=draft.id,
+                data={"questions": n, "warnings": draft.payload.get("warnings", []), "mode": "replicate"},
+                message=f"Reproduced '{draft.title}' verbatim with {n} question(s) from the uploaded paper.",
+            )
+
+        # mode == "generate": the count must be known — never silently default to a fixed number.
+        if parsed.count is None or parsed.count < 1:
+            return ToolResult(
+                ok=False,
+                message="Number of questions not specified.",
+                error=ErrorInfo(
+                    code="count_required",
+                    message=(
+                        "No question count was given. Determine it from the instructor's request, "
+                        "or call ask_user to ask how many questions they want before retrying."
+                    ),
                 ),
             )
         params = QuizParams(

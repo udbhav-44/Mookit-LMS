@@ -1,5 +1,7 @@
 """B3.3 acceptance — taxonomy resolution, diff preview, schedule→releaseOn, propose-not-execute."""
 
+import pytest
+
 from app.contracts import ProposedAction, ToolResult
 from app.tools.lecture import DraftLectureTool, PublishLectureTool
 from tests.fakes.fake_mookit import FakeMooKitClient
@@ -47,3 +49,13 @@ async def test_schedule_sets_release_on(ctx) -> None:
     result = await PublishLectureTool(reg).run(ctx, {"draft_id": aid})
     assert result.payload["releaseOn"] == 1893456000
     assert result.payload["published"] == 0  # scheduled, not immediately published
+
+
+async def test_publish_unresolved_week_refuses(ctx) -> None:
+    """C1: publishing a lecture whose week never resolved must raise, not send weekId=None."""
+    reg = InMemoryArtifactRegistry()
+    mookit = FakeMooKitClient()
+    aid, res = await _draft(ctx, reg, mookit, week_label="Week 99")
+    assert res.data["ambiguous"] is True and res.data["week_id"] is None
+    with pytest.raises(ValueError, match="wasn't matched to a course week"):
+        await PublishLectureTool(reg).run(ctx, {"draft_id": aid})

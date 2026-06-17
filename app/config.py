@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, SecretStr, field_validator, model_validat
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 # Bumped whenever the static system prompt / tool-schema preamble changes (cache-busting).
-PROMPT_VERSION = "1"
+PROMPT_VERSION = "3"
 
 
 class DatabaseConfig(BaseModel):
@@ -24,7 +24,6 @@ class OpenAIConfig(BaseModel):
     fast_model: str = "gpt-4o-mini"          # cheaper model for routing/extraction
     quiz_temperature: float = 0.9            # diversity for generation
     comprehend_temperature: float = 0.2      # blueprint comprehension: low, near-deterministic
-    verify_temperature: float = 0.0          # solve-verify: deterministic
     deterministic_temperature: float = 0.0   # evals / snapshots
     blueprint_model: str = "gpt-4o"          # long-context model for comprehension
     context_token_budget: int = 100_000      # source-router threshold; raise for long-context models
@@ -102,14 +101,15 @@ class Settings(BaseSettings):
     app_name: str = "mooKIT AI Assistant"
     debug: bool = False
     rag_backend: str = "pgvector"  # "pgvector" (embeddings) | "keyword" (Redis term-overlap fallback)
-    # Blueprint-first quiz pipeline (comprehend → plan → multi-span generate → verify). When False,
+    # Blueprint-first quiz pipeline (comprehend → plan → multi-span generate). When False,
     # the legacy one-span-per-question path is used. See app/gen/quiz/pipeline.py.
     quiz_blueprint_enabled: bool = False
     # Vision comprehension: read PDF page images so equations/figures survive (needs blueprint enabled).
     quiz_vision_enabled: bool = False
-    # Independent LLM solve-critique: re-derive each answer from evidence and flag disagreements
-    # (one extra LLM call per question; needs blueprint enabled). See app/gen/quiz/solve_verify.py.
-    quiz_solve_verify_enabled: bool = True
+    # Adaptive source routing: per request, decide between full-document comprehension (better coverage
+    # for a single doc that fits the model context) and top-k retrieval (cheaper, scales to large/many
+    # docs) using app/gen/quiz/source_router.py. Implies wiring the blueprint comprehender.
+    quiz_source_routing_enabled: bool = False
     # Create tables on startup (convenient for dev/out-of-box). Set False in prod and run
     # `alembic upgrade head` instead.
     auto_create_tables: bool = True
