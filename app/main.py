@@ -59,6 +59,21 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 
+# Idempotent, Postgres-safe DDL mirroring migration 0002 (durable history + per-session scoping).
+# Applied at startup under AUTO_CREATE_TABLES so a DB created before these columns existed self-heals.
+_ADDITIVE_SCHEMA_DDL = (
+    "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS title VARCHAR(512)",
+    "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE "
+    "NOT NULL DEFAULT now()",
+    "ALTER TABLE file_meta ADD COLUMN IF NOT EXISTS session_id VARCHAR(36)",
+    "ALTER TABLE artifacts ADD COLUMN IF NOT EXISTS session_id VARCHAR(36)",
+    "CREATE INDEX IF NOT EXISTS ix_sessions_tenant_user_updated "
+    "ON sessions (tenant_key, user_id, updated_at)",
+    "CREATE INDEX IF NOT EXISTS ix_file_meta_session_id ON file_meta (session_id)",
+    "CREATE INDEX IF NOT EXISTS ix_artifacts_session_id ON artifacts (session_id)",
+)
+
+
 # ── Instance registry (A4.6) — in-memory cache of instance_id → base_url ────
 
 _instance_url_cache: dict[str, str] = {}
@@ -145,6 +160,14 @@ async def lifespan(app: FastAPI):
                 except Exception as exc:
                     logger.warning("Could not ensure pgvector extension: %s", exc)
                 await conn.run_sync(Base.metadata.create_all)
+                # create_all only CREATEs missing tables — it never ALTERs existing ones. Apply the
+                # additive columns/indexes from migration 0002 idempotently so an already-provisioned
+                # DB self-heals on restart (mirrors AUTO_CREATE_TABLES' out-of-the-box philosophy).
+                for ddl in _ADDITIVE_SCHEMA_DDL:
+                    try:
+                        await conn.execute(text(ddl))
+                    except Exception as exc:
+                        logger.warning("Additive schema step skipped (%s): %s", ddl.split("\n")[0], exc)
             logger.info("Database schema ensured.")
         except Exception as exc:
             logger.warning("DB schema init skipped/failed: %s", exc)

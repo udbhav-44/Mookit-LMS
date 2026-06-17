@@ -261,7 +261,16 @@ class MooKitClient(IMooKitClient):
         self, ctx: RequestContext, type: str, assessment_id: int, body: SectionCreate
     ) -> Any:
         path = f"/assessments/{type}/{assessment_id}/sections"
-        return await self.call(ctx, "POST", path, json=body.model_dump(exclude_none=True))
+        section_body = body.model_dump(exclude_none=True)
+        # mooKIT cross-validates randomQuestionCount against randomizeQuestions. If the field is
+        # *omitted* while randomization is off, mooKIT server-defaults it to 0 and then rejects the
+        # request ("Random Question Count must be null when Randomize Questions is disabled"). So send
+        # it explicitly: null when off, and the (required, >=1) value when on.
+        if body.randomizeQuestions == 1:
+            section_body["randomQuestionCount"] = body.randomQuestionCount
+        else:
+            section_body["randomQuestionCount"] = None
+        return await self.call(ctx, "POST", path, json=section_body)
 
     async def add_question(
         self,
