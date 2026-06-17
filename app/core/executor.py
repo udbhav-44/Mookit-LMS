@@ -17,6 +17,7 @@ Payload shapes (produced by Dev B publish tools):
 """
 
 import logging
+import time
 from typing import Any
 
 from ..contracts.context import RequestContext
@@ -32,6 +33,16 @@ from ..mookit.schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+# mooKIT rejects structural edits (adding sections/questions) while an assessment's availability
+# window is active. We build the assessment under a window starting this far in the future so it
+# stays editable, then apply the instructor's real schedule + publish status in the final update.
+_BUILD_WINDOW_OFFSET = 365 * 86400  # 1 year out — safely inactive during construction
+_DAY = 86400
+
+# Shown when a question reaches publish with no extractable stem; flags it for instructor editing
+# instead of letting mooKIT reject the entire assessment (minLength 1 on questionText).
+_BLANK_QUESTION_PLACEHOLDER = "(Question text could not be extracted — please edit before use.)"
 
 # Maps action name → (resource, mooKIT action string) for permission re-validation.
 ACTION_TO_RESOURCE: dict[str, tuple[str, str]] = {
@@ -102,7 +113,34 @@ class DeterministicExecutor:
     # ------------------------------------------------------------------
     async def _publish_assessment(self, ctx: RequestContext, payload: dict) -> Any:
         atype = str(payload.get("_type", "quizzes"))
-        assessment_body = AssessmentCreate(**payload["assessment"])
+        requested = dict(payload["assessment"])
+
+        # Capture the instructor-approved schedule + publish status, then build under a far-future,
+        # unpublished window so mooKIT keeps the assessment editable while we add the section and
+        # questions (otherwise create_section 409s: "cannot be edited during the active window").
+        now = int(time.time())
+        final_published = requested.get("published") or {"status": 1, "releaseOn": None}
+        req_start = requested.get("startDate")
+        # A start in the past means "available now"; clamp to now so the final publish stays valid.
+        final_start = req_start if (req_start is not None and req_start > now) else now
+        final_schedule = {
+            "startDate": final_start,
+            "endDate": requested.get("endDate"),
+            "endDapDate": requested.get("endDapDate"),
+            "resultsDate": requested.get("resultsDate"),
+            "published": final_published,
+        }
+
+        build_start = now + _BUILD_WINDOW_OFFSET
+        requested.update({
+            "startDate": build_start,
+            "endDate": build_start + 7 * _DAY,
+            "endDapDate": build_start + 7 * _DAY,
+            "resultsDate": build_start + 8 * _DAY,
+            "published": {"status": 0, "releaseOn": None},
+        })
+
+        assessment_body = AssessmentCreate(**requested)
         created = await self.mookit.create_assessment(ctx, atype, assessment_body)
         assessment_id = _entity_id(created)
 
@@ -125,9 +163,18 @@ class DeterministicExecutor:
                 SectionCreate(title=payload.get("section_title", "Questions")),
             )
             section_id = _entity_id(section) or 0
-            for q in payload.get("questions", []):
+            for i, q in enumerate(payload.get("questions", [])):
                 # Inject diagram fileId if one was matched for this question's text.
                 q = dict(q)
+                # mooKIT requires questionText (minLength 1). A verbatim/extraction miss can leave a
+                # blank stem; substitute a flagged placeholder so one bad item can't 400 the whole
+                # publish (which would otherwise leave a partially-populated assessment behind).
+                if not str(q.get("questionText") or "").strip():
+                    logger.warning(
+                        "publish_assessment: blank questionText at index %d (%s) — using placeholder",
+                        i, q.get("questionType", "?"),
+                    )
+                    q["questionText"] = _BLANK_QUESTION_PLACEHOLDER
                 q_text = q.get("questionText", "")
                 matched_file_id = _match_diagram(q_text, diagram_file_ids)
                 if matched_file_id is not None:
@@ -136,9 +183,9 @@ class DeterministicExecutor:
                 await self.mookit.add_question(
                     ctx, atype, int(assessment_id), int(section_id), QuestionCreate(**q)
                 )
-            # Publish: flip published.status to 1.
+            # Structure is in place — now apply the instructor's real schedule and publish status.
             await self.mookit.update_assessment(
-                ctx, atype, int(assessment_id), {"published": {"status": 1, "releaseOn": None}}
+                ctx, atype, int(assessment_id), {k: v for k, v in final_schedule.items() if v is not None}
             )
         return created
 

@@ -288,11 +288,13 @@ class MooKitClient(IMooKitClient):
     # ------------------------------------------------------------------
 
     async def create_announcement(self, ctx: RequestContext, body: AnnouncementCreate) -> Any:
-        return await self.call(ctx, "POST", "/announcements/add", json=body.model_dump(exclude_none=True))
+        # Live mooKIT uses REST collection routes (POST /announcements), not the /add alias the
+        # bundled OpenAPI spec documents — verified against test.mookit.in (the /add path 404s).
+        return await self.call(ctx, "POST", "/announcements", json=body.model_dump(exclude_none=True))
 
     async def update_announcement(self, ctx: RequestContext, announcement_id: int, body: AnnouncementUpdate) -> Any:
         return await self.call(
-            ctx, "PUT", f"/announcements/edit/{announcement_id}",
+            ctx, "PUT", f"/announcements/{announcement_id}",
             json=body.model_dump(exclude_none=True),
         )
 
