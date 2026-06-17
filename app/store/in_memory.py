@@ -42,6 +42,12 @@ class InMemorySessionStore(ISessionStore):
     async def get_summary(self, ctx: RequestContext) -> str | None:
         return self._summaries.get(self._key(ctx))
 
+    async def has_transcript(self, ctx: RequestContext) -> bool:
+        return bool(self._transcripts.get(self._key(ctx)))
+
+    async def replace_transcript(self, ctx: RequestContext, messages: list[Message]) -> None:
+        self._transcripts[self._key(ctx)] = list(messages)
+
 
 class InMemoryArtifactRegistry(IArtifactRegistry):
     """In-memory ArtifactRegistry for unit tests and Dev B local development."""

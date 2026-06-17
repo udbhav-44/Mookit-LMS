@@ -61,3 +61,19 @@ class RedisSessionStore(ISessionStore):
         key = self._summary_key(ctx)
         value = await self.redis.get(key)
         return value if isinstance(value, str) else (value.decode() if value else None)
+
+    async def has_transcript(self, ctx: RequestContext) -> bool:
+        """True if the hot transcript list still exists (i.e. the 24h TTL hasn't expired it)."""
+        return bool(await self.redis.exists(self._transcript_key(ctx)))
+
+    async def replace_transcript(self, ctx: RequestContext, messages: list[Message]) -> None:
+        """Atomically overwrite the live transcript with ``messages`` (used to rehydrate a cold
+        session from the durable Postgres record). Resets the 24h TTL so the session goes warm."""
+        key = self._transcript_key(ctx)
+        pipe = self.redis.pipeline()
+        pipe.delete(key)
+        for msg in messages:
+            pipe.rpush(key, msg.model_dump_json())
+        if messages:
+            pipe.expire(key, self._TTL)
+        await pipe.execute()

@@ -84,6 +84,49 @@ async def upsert_session(
         await db.commit()
 
 
+async def persist_summary(
+    session_factory: Any,
+    ctx: RequestContext,
+    summary: str | None,
+) -> None:
+    """Mirror the rolling compaction summary into Postgres so it survives Redis' TTL.
+
+    No-op on empty input. Does not touch ``updated_at`` (the chat turn already bumps it) so a summary
+    write can't reorder the history list.
+    """
+    if not summary:
+        return
+    async with session_factory() as db:
+        await db.execute(
+            update(SessionModel)
+            .where(
+                SessionModel.id == ctx.session_id,
+                SessionModel.tenant_key == ctx.tenant_key,
+            )
+            # Setting updated_at to itself keeps it in the SET clause, which suppresses the column's
+            # onupdate default — so a summary write never reorders the most-recent-first history list.
+            .values(summary=summary, updated_at=SessionModel.updated_at)
+        )
+        await db.commit()
+
+
+async def get_session_summary(
+    session_factory: Any,
+    ctx: RequestContext,
+    session_id: str,
+) -> str | None:
+    """Durable compaction summary for a session (used to rehydrate Redis on a cold session)."""
+    async with session_factory() as db:
+        return (
+            await db.execute(
+                select(SessionModel.summary).where(
+                    SessionModel.id == session_id,
+                    SessionModel.tenant_key == ctx.tenant_key,
+                )
+            )
+        ).scalar_one_or_none()
+
+
 async def persist_message(
     session_factory: Any,
     ctx: RequestContext,

@@ -35,13 +35,25 @@ from sse_starlette.sse import EventSourceResponse
 
 from ..config import settings
 from ..contracts.context import RequestContext
+from ..contracts.stores import Message
 from ..core.context import get_request_context
 from ..core.rate_limit import check_rate_limit
-from ..store.session_repo import persist_message, upsert_session
+from ..store.session_repo import (
+    get_session_summary,
+    list_session_messages,
+    persist_message,
+    persist_summary,
+    upsert_session,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Cap how many durable turns we push back into Redis when warming a cold session. The memory layer
+# trims by token budget on read anyway, so a recent window is enough to restore continuity without
+# bloating the Redis list for very long histories.
+_REHYDRATE_MAX = 50
 
 
 class ChatRequest(BaseModel):
@@ -67,6 +79,7 @@ async def chat_endpoint(
     audit = getattr(request.app.state, "audit_logger", None)
     orchestrator = getattr(request.app.state, "orchestrator", None)
     session_factory = getattr(request.app.state, "session_factory", None)
+    session_store = getattr(request.app.state, "session_store", None)
     ping_interval = settings.limits.sse_ping_interval_seconds
 
     async def event_generator():
@@ -79,6 +92,11 @@ async def chat_endpoint(
         try:
             # ── Audit: start (best-effort) ─────────────────────────────────────
             await _safe_audit(audit, ctx, action="chat_start", status="in_progress")
+
+            # ── Rehydrate working memory if Redis is cold ─────────────────────
+            # Must run BEFORE we persist this turn so the durable read contains only prior turns
+            # (the orchestrator appends the current user message to Redis itself — no double-write).
+            await _rehydrate_if_cold(session_store, session_factory, ctx)
 
             # ── Durable: create/refresh session row + record the user turn ─────
             await _safe_persist(
@@ -116,6 +134,11 @@ async def chat_endpoint(
             await _safe_persist(
                 session_factory, "touch_session",
                 lambda: upsert_session(session_factory, ctx),
+            )
+            # Mirror the rolling compaction summary (Redis) into Postgres so it survives the TTL.
+            await _safe_persist(
+                session_factory, "summary",
+                lambda: _persist_summary_from_store(session_store, session_factory, ctx),
             )
 
             # ── Done ──────────────────────────────────────────────────────────
@@ -169,6 +192,50 @@ async def _safe_persist(session_factory: Any, label: str, make_coro: Any) -> Non
         await make_coro()
     except Exception as exc:
         logger.warning("Durable %s skipped: %s", label, exc)
+
+
+async def _rehydrate_if_cold(session_store: Any, session_factory: Any, ctx: RequestContext) -> None:
+    """Warm the orchestrator's working memory from the durable transcript when Redis has expired.
+
+    Redis holds the live context the orchestrator reasons over, but it carries a 24h TTL. When a user
+    reopens an old chat after that, Redis is empty while Postgres still has the full transcript —
+    without this the assistant would "forget" the conversation it's visibly resuming. We repopulate
+    Redis from Postgres once, before recording the new turn, so the orchestrator sees prior history.
+    Best-effort: any failure just means the session starts cold (the prior behaviour), never a broken
+    stream.
+    """
+    if session_store is None or session_factory is None:
+        return
+    try:
+        if await session_store.has_transcript(ctx):
+            return  # already warm — orchestrator's live memory is intact
+        prior = await list_session_messages(session_factory, ctx, ctx.session_id)
+        if not prior:
+            return  # brand-new session — nothing to restore
+        recent = prior[-_REHYDRATE_MAX:]
+        messages = [Message(role=m["role"], content=m["content"]) for m in recent]
+        await session_store.replace_transcript(ctx, messages)
+        # Restore the compaction summary too, so older context (beyond the recent window) isn't lost.
+        summary = await get_session_summary(session_factory, ctx, ctx.session_id)
+        if summary:
+            await session_store.set_summary(ctx, summary)
+        logger.info(
+            "Rehydrated %d/%d durable messages%s into Redis for cold session %s",
+            len(messages), len(prior), " + summary" if summary else "", ctx.session_id,
+        )
+    except Exception as exc:
+        logger.warning("Session rehydrate skipped: %s", exc)
+
+
+async def _persist_summary_from_store(
+    session_store: Any, session_factory: Any, ctx: RequestContext
+) -> None:
+    """Copy the current Redis compaction summary into Postgres (best-effort, called post-turn)."""
+    if session_store is None:
+        return
+    summary = await session_store.get_summary(ctx)
+    if summary:
+        await persist_summary(session_factory, ctx, summary)
 
 
 def _accumulate_assistant(event: dict, buf: list[str]) -> None:

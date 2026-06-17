@@ -35,6 +35,16 @@ class SessionStore(ABC):
     @abstractmethod
     async def get_summary(self, ctx: RequestContext) -> str | None: ...
 
+    @abstractmethod
+    async def has_transcript(self, ctx: RequestContext) -> bool:
+        """True if the live (hot) transcript exists. Used to detect a cold session needing rehydrate."""
+        ...
+
+    @abstractmethod
+    async def replace_transcript(self, ctx: RequestContext, messages: list[Message]) -> None:
+        """Atomically replace the live transcript — used to rehydrate working memory from durable storage."""
+        ...
+
 class ArtifactRegistry(ABC):
     @abstractmethod
     async def add(self, ctx: RequestContext, art: Artifact) -> str: ...

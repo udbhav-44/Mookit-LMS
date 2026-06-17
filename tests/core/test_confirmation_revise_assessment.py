@@ -12,7 +12,7 @@ import time
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import insert, select
+from sqlalchemy import insert
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.confirmation import ConfirmationGate, _canonical_hash
@@ -121,7 +121,8 @@ async def test_revise_requires_duration_when_timed(session_factory):
 
 @pytest.mark.asyncio
 async def test_executor_publishes_with_revised_dates(session_factory, ctx):
-    """After revise, the stored payload drives the executor → mooKIT create_assessment body."""
+    """After revise, the executor builds under an editable future window, then applies the
+    instructor's revised schedule via a final update_assessment (avoids mooKIT's active-window 409)."""
     action_id = await _seed(session_factory, _base_payload(), tenant_key=ctx.tenant_key)
     gate = ConfirmationGate(session_factory)
     now = int(time.time())
@@ -134,8 +135,16 @@ async def test_executor_publishes_with_revised_dates(session_factory, ctx):
     executor = DeterministicExecutor(mookit)
     await executor.execute(ctx, "publish_assessment", dict(revised.payload))
 
+    # Phase 1: created under a far-future, unpublished window so it stays editable while we add Qs.
     create_calls = [kw for (m, kw) in mookit.calls if m == "create_assessment"]
     assert create_calls, "expected create_assessment to be called"
-    body = create_calls[0]["body"]
-    assert body.endDate == now + 21 * _DAY
-    assert body.resultsDate == now + 22 * _DAY
+    build_body = create_calls[0]["body"]
+    assert build_body.startDate > now + _DAY, "build window must start well in the future"
+    assert build_body.published == {"status": 0, "releaseOn": None}
+
+    # Phase 2: the revised schedule + publish status is applied in the final update_assessment.
+    update_calls = [kw for (m, kw) in mookit.calls if m == "update_assessment"]
+    assert update_calls, "expected a final update_assessment to apply the real schedule"
+    patch = update_calls[-1]["patch"]
+    assert patch["endDate"] == now + 21 * _DAY
+    assert patch["resultsDate"] == now + 22 * _DAY

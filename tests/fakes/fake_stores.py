@@ -43,6 +43,12 @@ class InMemorySessionStore(SessionStore):
     async def get_summary(self, ctx: RequestContext) -> str | None:
         return self._summary.get(_skey(ctx))
 
+    async def has_transcript(self, ctx: RequestContext) -> bool:
+        return bool(self._messages.get(_skey(ctx)))
+
+    async def replace_transcript(self, ctx: RequestContext, messages: list[Message]) -> None:
+        self._messages[_skey(ctx)] = list(messages)
+
 
 class InMemoryArtifactRegistry(ArtifactRegistry):
     def __init__(self) -> None:

@@ -12,17 +12,21 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from app.api.chat import _REHYDRATE_MAX, _rehydrate_if_cold
 from app.contracts.context import PermissionMatrix, RequestContext
 from app.store.db import Artifact as ArtifactModel
 from app.store.db import Base
 from app.store.db import Message as MessageModel
 from app.store.db import Session as SessionModel
+from app.store.in_memory import InMemorySessionStore
 from app.store.session_repo import (
     derive_title,
+    get_session_summary,
     list_session_artifacts,
     list_session_messages,
     list_sessions,
     persist_message,
+    persist_summary,
     upsert_session,
 )
 
@@ -142,3 +146,97 @@ async def test_list_session_artifacts_splits_and_filters_by_session(session_fact
     assert [u["id"] for u in result["uploads"]] == ["f1"]
     assert [d["id"] for d in result["drafts"]] == ["d1"]
     assert result["uploads"][0]["kind"] == "document"
+
+
+# ── Rehydration: warm the orchestrator's Redis memory from Postgres on a cold session ──────────
+
+async def test_rehydrate_cold_session_restores_durable_transcript(session_factory):
+    ctx = _ctx(session="s-cold")
+    await upsert_session(session_factory, ctx, first_user_message="earlier turn")
+    await persist_message(session_factory, ctx, "user", "earlier turn")
+    await persist_message(session_factory, ctx, "assistant", "earlier reply")
+
+    store = InMemorySessionStore()  # simulates Redis having expired (empty)
+    assert await store.has_transcript(ctx) is False
+
+    await _rehydrate_if_cold(store, session_factory, ctx)
+
+    restored = await store.get_transcript(ctx, max_tokens=10_000)
+    assert [(m.role, m.content) for m in restored] == [
+        ("user", "earlier turn"),
+        ("assistant", "earlier reply"),
+    ]
+
+
+async def test_rehydrate_noop_when_already_warm(session_factory):
+    ctx = _ctx(session="s-warm")
+    # Postgres has an old turn, but Redis is already warm with a live one — must not be clobbered.
+    await persist_message(session_factory, ctx, "user", "durable-only turn")
+    store = InMemorySessionStore()
+    await store.append_message(ctx, "user", "live turn")
+
+    await _rehydrate_if_cold(store, session_factory, ctx)
+
+    restored = await store.get_transcript(ctx, max_tokens=10_000)
+    assert [m.content for m in restored] == ["live turn"]
+
+
+async def test_rehydrate_noop_for_brand_new_session(session_factory):
+    ctx = _ctx(session="s-brand-new")
+    store = InMemorySessionStore()
+
+    await _rehydrate_if_cold(store, session_factory, ctx)
+
+    assert await store.has_transcript(ctx) is False
+
+
+async def test_rehydrate_caps_to_recent_window(session_factory):
+    ctx = _ctx(session="s-long")
+    total = _REHYDRATE_MAX + 10
+    for i in range(total):
+        await persist_message(session_factory, ctx, "user", f"msg {i}")
+
+    store = InMemorySessionStore()
+    await _rehydrate_if_cold(store, session_factory, ctx)
+
+    restored = await store.get_transcript(ctx, max_tokens=10_000_000)
+    assert len(restored) == _REHYDRATE_MAX
+    # Keeps the most-recent window (oldest dropped).
+    assert restored[0].content == f"msg {total - _REHYDRATE_MAX}"
+    assert restored[-1].content == f"msg {total - 1}"
+
+
+async def test_persist_and_get_summary_roundtrip(session_factory):
+    ctx = _ctx(session="s-sum")
+    await upsert_session(session_factory, ctx, first_user_message="hi")
+    await persist_summary(session_factory, ctx, "")  # empty is a no-op
+    assert await get_session_summary(session_factory, ctx, ctx.session_id) is None
+
+    await persist_summary(session_factory, ctx, "condensed history of the chat")
+    assert await get_session_summary(session_factory, ctx, ctx.session_id) == "condensed history of the chat"
+
+
+async def test_persist_summary_does_not_reorder_history(session_factory):
+    """Writing a summary must not bump updated_at (which would reorder the history list)."""
+    now = datetime.now(timezone.utc)
+    older = _ctx(user=1, session="sum-older")
+    newer = _ctx(user=1, session="sum-newer")
+    await _seed_session(session_factory, older, title="Older", updated_at=now - timedelta(hours=1))
+    await _seed_session(session_factory, newer, title="Newer", updated_at=now)
+
+    await persist_summary(session_factory, older, "a summary written later")
+
+    ids = [s["id"] for s in await list_sessions(session_factory, _ctx(user=1))]
+    assert ids == ["sum-newer", "sum-older"], "summary write must not reorder the history list"
+
+
+async def test_rehydrate_restores_summary(session_factory):
+    ctx = _ctx(session="s-sum-rehydrate")
+    await upsert_session(session_factory, ctx, first_user_message="hi")
+    await persist_message(session_factory, ctx, "user", "older turn")
+    await persist_summary(session_factory, ctx, "earlier condensed context")
+
+    store = InMemorySessionStore()
+    await _rehydrate_if_cold(store, session_factory, ctx)
+
+    assert await store.get_summary(ctx) == "earlier condensed context"
