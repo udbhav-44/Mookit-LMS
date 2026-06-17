@@ -117,6 +117,7 @@ async def upload_file(
             storage_path=str(storage_path),
             extraction_status=initial_status,
             user_id=ctx.user_id,
+            session_id=ctx.session_id,  # scope the upload to the chat that created it
         )
         await session.execute(stmt)
         await session.commit()

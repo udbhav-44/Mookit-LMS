@@ -37,6 +37,7 @@ from ..config import settings
 from ..contracts.context import RequestContext
 from ..core.context import get_request_context
 from ..core.rate_limit import check_rate_limit
+from ..store.session_repo import persist_message, upsert_session
 
 logger = logging.getLogger(__name__)
 
@@ -65,16 +66,29 @@ async def chat_endpoint(
 
     audit = getattr(request.app.state, "audit_logger", None)
     orchestrator = getattr(request.app.state, "orchestrator", None)
+    session_factory = getattr(request.app.state, "session_factory", None)
     ping_interval = settings.limits.sse_ping_interval_seconds
 
     async def event_generator():
+        # Durable transcript is a deliberate dual-write: Redis stays authoritative for the live
+        # context window (the orchestrator keeps writing it), and Postgres is the durable record that
+        # survives Redis' 24h TTL + a reload and powers the chat-history list. We persist one
+        # concatenated assistant message per HTTP turn (a known fidelity trade-off). Every write is
+        # best-effort via _safe_persist so a missing/slow DB never aborts the SSE stream.
+        assistant_buf: list[str] = []
         try:
-            # The orchestrator (Dev B) owns transcript persistence (user + assistant turns) via the
-            # session store, so we do NOT append here to avoid a duplicate user message. The stub
-            # path below persists nothing (temporary).
-
             # ── Audit: start (best-effort) ─────────────────────────────────────
             await _safe_audit(audit, ctx, action="chat_start", status="in_progress")
+
+            # ── Durable: create/refresh session row + record the user turn ─────
+            await _safe_persist(
+                session_factory, "upsert_session",
+                lambda: upsert_session(session_factory, ctx, first_user_message=body.message),
+            )
+            await _safe_persist(
+                session_factory, "user_message",
+                lambda: persist_message(session_factory, ctx, "user", body.message),
+            )
 
             # ── Main turn: call the orchestrator if wired, else stub ──────────
             if orchestrator is not None:
@@ -84,12 +98,25 @@ async def chat_endpoint(
                     if await request.is_disconnected():
                         logger.info("Client disconnected mid-stream: %s", ctx.request_id)
                         return
+                    _accumulate_assistant(event, assistant_buf)
                     yield event
             else:
                 # Stub turn — used until Dev B wires in the real orchestrator.
                 await _send_ping(ping_interval, request)
-                yield _sse("assistant_delta", {"text": "[Orchestrator not yet wired — stub response]"})
+                stub = _sse("assistant_delta", {"text": "[Orchestrator not yet wired — stub response]"})
+                _accumulate_assistant(stub, assistant_buf)
+                yield stub
                 await asyncio.sleep(0)
+
+            # ── Durable: record the assistant turn + bump updated_at ───────────
+            await _safe_persist(
+                session_factory, "assistant_message",
+                lambda: persist_message(session_factory, ctx, "assistant", "".join(assistant_buf)),
+            )
+            await _safe_persist(
+                session_factory, "touch_session",
+                lambda: upsert_session(session_factory, ctx),
+            )
 
             # ── Done ──────────────────────────────────────────────────────────
             await _safe_audit(audit, ctx, action="chat_end", status="success")
@@ -132,6 +159,28 @@ async def _safe_audit(audit: Any, ctx: RequestContext, **kwargs: Any) -> None:
         await audit.log(ctx, **kwargs)
     except Exception as exc:
         logger.warning("Audit log skipped: %s", exc)
+
+
+async def _safe_persist(session_factory: Any, label: str, make_coro: Any) -> None:
+    """Run a durable-history write best-effort: a missing/slow DB must never abort the SSE stream."""
+    if session_factory is None:
+        return
+    try:
+        await make_coro()
+    except Exception as exc:
+        logger.warning("Durable %s skipped: %s", label, exc)
+
+
+def _accumulate_assistant(event: dict, buf: list[str]) -> None:
+    """Capture assistant text from the same assistant_delta events the client renders (no drift)."""
+    if event.get("event") != "assistant_delta":
+        return
+    try:
+        text = json.loads(event.get("data") or "{}").get("text")
+    except (ValueError, TypeError):
+        return
+    if text:
+        buf.append(text)
 
 
 async def _send_ping(interval: float, request: Request) -> None:

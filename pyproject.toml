@@ -83,6 +83,7 @@ dev-dependencies = [
     "respx>=0.21",
     "httpx>=0.27",
     "pre-commit>=3.7",
+    "aiosqlite>=0.22.1",
 ]
 
 [tool.setuptools.packages.find]

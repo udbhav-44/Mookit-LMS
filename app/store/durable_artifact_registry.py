@@ -38,6 +38,7 @@ class DurableArtifactRegistry(IArtifactRegistry):
                 payload=art.payload,
                 provenance=art.provenance,
                 user_id=ctx.user_id,
+                session_id=ctx.session_id,  # scope to the chat that created it (per-session context)
             )
             await session.execute(stmt)
             await session.commit()
@@ -85,7 +86,9 @@ class DurableArtifactRegistry(IArtifactRegistry):
             raise ValueError(f"Artifact {artifact_id} not found after update")
         return updated
 
-    async def list(self, ctx: RequestContext, *, type: str | None = None) -> list[Artifact]:
+    async def list(
+        self, ctx: RequestContext, *, type: str | None = None, session_id: str | None = None
+    ) -> list[Artifact]:
         async with self.session_factory() as session:
             stmt = select(ArtifactModel).where(
                 ArtifactModel.tenant_key == ctx.tenant_key,
@@ -93,6 +96,8 @@ class DurableArtifactRegistry(IArtifactRegistry):
             )
             if type:
                 stmt = stmt.where(ArtifactModel.type == type)
+            if session_id is not None:  # default None preserves the existing cross-session behavior
+                stmt = stmt.where(ArtifactModel.session_id == session_id)
             result = await session.execute(stmt)
             rows = result.scalars().all()
 

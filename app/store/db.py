@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -18,10 +18,23 @@ class Session(Base, TenantMixin):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Human-readable label for the chat-history list (derived from the first user message).
+    title: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
+    # Bumped on every turn so the history list can sort most-recent-first.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_sessions_tenant_user_updated", "tenant_key", "user_id", "updated_at"),
+    )
 
 
 class Message(Base, TenantMixin):
@@ -48,6 +61,8 @@ class Artifact(Base, TenantMixin):
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     provenance: Mapped[dict] = mapped_column(JSON, nullable=False)
     user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Which chat session produced this artifact (nullable: pre-existing rows + non-chat creation).
+    session_id: Mapped[str | None] = mapped_column(String(36), index=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
@@ -106,6 +121,8 @@ class FileMeta(Base, TenantMixin):
     # pending | extracting | indexed | failed
     job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)  # ARQ job ID for progress polling
     user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Which chat session this upload belongs to (nullable: pre-existing rows + non-chat uploads).
+    session_id: Mapped[str | None] = mapped_column(String(36), index=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
