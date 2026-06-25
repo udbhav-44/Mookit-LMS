@@ -51,6 +51,7 @@ from .audit.logger import AuditLogger
 from .config import settings
 from .mookit.client import MooKitClient
 from .obs.logging import setup_logging
+from .obs.openai_client import make_async_openai_client
 from .obs.tracing import init_langfuse, init_otel
 from .store.durable_artifact_registry import DurableArtifactRegistry
 from .store.redis_store import RedisSessionStore
@@ -201,10 +202,10 @@ async def lifespan(app: FastAPI):
     )
 
     # 8. Shared OpenAI client + RAG store (pgvector embeddings, or keyword fallback).
-    from openai import AsyncOpenAI
-
     from .store.rag_factory import make_rag_store
-    app.state.openai_client = AsyncOpenAI(api_key=settings.openai.api_key.get_secret_value())
+    app.state.openai_client = make_async_openai_client(
+        api_key=settings.openai.api_key.get_secret_value()
+    )
     app.state.rag_store = make_rag_store(
         settings,
         redis=app.state.redis,

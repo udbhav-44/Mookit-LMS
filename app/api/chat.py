@@ -38,6 +38,7 @@ from ..contracts.context import RequestContext
 from ..contracts.stores import Message
 from ..core.context import get_request_context
 from ..core.rate_limit import check_rate_limit
+from ..obs.langfuse_context import push_langfuse_context
 from ..store.session_repo import (
     get_session_summary,
     list_session_messages,
@@ -112,12 +113,13 @@ async def chat_endpoint(
             if orchestrator is not None:
                 # Dev B provides app.state.orchestrator as an async generator that
                 # yields SSE event dicts {"event": "...", "data": "..."}.
-                async for event in orchestrator.stream(ctx, body.message, references=body.references):
-                    if await request.is_disconnected():
-                        logger.info("Client disconnected mid-stream: %s", ctx.request_id)
-                        return
-                    _accumulate_assistant(event, assistant_buf)
-                    yield event
+                with push_langfuse_context(ctx, feature="chat"):
+                    async for event in orchestrator.stream(ctx, body.message, references=body.references):
+                        if await request.is_disconnected():
+                            logger.info("Client disconnected mid-stream: %s", ctx.request_id)
+                            return
+                        _accumulate_assistant(event, assistant_buf)
+                        yield event
             else:
                 # Stub turn — used until Dev B wires in the real orchestrator.
                 await _send_ping(ping_interval, request)

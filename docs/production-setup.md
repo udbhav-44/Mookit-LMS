@@ -21,6 +21,14 @@ real mooKIT writes through the deterministic confirmation executor.
 Postgres must have the `vector` extension (the migration / startup creates it; the role needs
 permission to `CREATE EXTENSION`).
 
+### Network exposure policy (critical)
+- Expose only the UI/API entrypoint and SSH at the host perimeter.
+- `postgres` and `redis` are internal-only in Compose (no host port publishing).
+- Redis now requires authentication (`REDIS_PASSWORD`) and clients use
+  `REDIS__URL=redis://:${REDIS_PASSWORD}@redis:6379/0`.
+- `pgadmin` is opt-in via profile and bound to localhost by default:
+  `docker compose --profile ops up -d pgadmin`.
+
 ## 3. Database migrations (production)
 Set `AUTO_CREATE_TABLES=false` in prod and run Alembic:
 ```bash
@@ -43,6 +51,9 @@ idle/read timeout **above** the 15s heartbeat (e.g. nginx `proxy_buffering off; 
 ```bash
 MOOKIT_TOKEN=<jwt> python scripts/probe_mookit.py     # live reads (users_me, permissions, taxonomy)
 pytest -q -m live                                     # one real streamed OpenAI turn
+# Should fail from outside the host after hardening:
+#   nc -vz <host> 6379   # closed
+#   nc -vz <host> 5432   # closed
 # then exercise each flow end-to-end via /ui or the API:
 #   quiz from a PDF  ·  announcement  ·  lecture (with a real video upload)
 ```

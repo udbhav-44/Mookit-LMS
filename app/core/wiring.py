@@ -7,8 +7,6 @@ OpenAI generator), and a proposal sink backed by the DB ConfirmationGate.
 
 from __future__ import annotations
 
-from openai import AsyncOpenAI
-
 from app.config import Settings
 from app.contracts import ProposedAction, RequestContext
 from app.core.confirmation import ConfirmationGate
@@ -22,6 +20,7 @@ from app.gen.quiz.generator import OpenAIQuestionGenerator
 from app.gen.quiz.pipeline import QuizPipeline
 from app.gen.quiz.replicate import OpenAIQuestionPaperReplicator
 from app.llm.openai import OpenAIProvider
+from app.obs.openai_client import make_async_openai_client
 from app.tools.announcement import DraftAnnouncementTool, SendAnnouncementTool
 from app.tools.ask_user import AskUserTool
 from app.tools.assessment import CreateQuizTool, EditQuizTool, PublishAssessmentTool
@@ -42,7 +41,9 @@ def build_orchestrator(
     openai_client=None,
     redis=None,
 ) -> Orchestrator:
-    client = openai_client or AsyncOpenAI(api_key=settings.openai.api_key.get_secret_value())
+    client = openai_client or make_async_openai_client(
+        api_key=settings.openai.api_key.get_secret_value()
+    )
     provider = OpenAIProvider(client, default_model=settings.openai.model)
     fast_provider = OpenAIProvider(client, default_model=settings.openai.fast_model)
     guardrail_hook = make_openai_guardrail(client)

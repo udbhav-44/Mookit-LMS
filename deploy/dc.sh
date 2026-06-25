@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Tail backend logs. Usage: ./logs.sh [api|worker|postgres|pgadmin|redis|all]
+# Compose wrapper that always loads ../.env from deploy/.
 set -euo pipefail
-
 cd "$(dirname "$0")"
 
 if docker compose version >/dev/null 2>&1; then
@@ -20,14 +19,4 @@ if [[ -f "$ENV_FILE" ]]; then
   COMPOSE+=(--env-file "$ENV_FILE")
 fi
 
-svc="${1:-api}"
-case "$svc" in
-  api|worker|postgres|pgadmin|redis)
-    sudo "${COMPOSE[@]}" logs -f "$svc"
-    ;;
-  all)      sudo "${COMPOSE[@]}" logs -f ;;
-  *)
-    echo "Usage: $0 [api|worker|postgres|pgadmin|redis|all]" >&2
-    exit 1
-    ;;
-esac
+exec sudo "${COMPOSE[@]}" "$@"

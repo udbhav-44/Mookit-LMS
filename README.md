@@ -86,6 +86,25 @@ cd deploy
 sudo docker compose --env-file ../.env up -d --build
 ```
 
+### Restart after changes
+
+From `deploy/`, use the wrapper so `.env` is always loaded:
+
+```bash
+cd deploy
+./dc.sh up -d --build          # rebuild + recreate (use after code/Dockerfile changes)
+./dc.sh up -d                  # restart with current images (env/config-only changes)
+./dc.sh down --remove-orphans  # stop everything cleanly
+./dc.sh ps                     # status
+./logs.sh api                  # tail service logs (api/worker/postgres/pgadmin/redis/all)
+```
+
+If scripts are not executable once:
+
+```bash
+chmod +x deploy/dc.sh deploy/logs.sh deploy/up.sh
+```
+
 ## Sample chat UI
 
 `sample-ui/index.html` — vanilla-JS client served at `/ui`:

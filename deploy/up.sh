@@ -36,7 +36,10 @@ fi
 
 HOST_IP="$(hostname -I | awk '{print $1}')"
 echo ""
-echo "Stack up. Sample UI: http://${HOST_IP}:8000/ui"
-echo "pgAdmin:           http://${HOST_IP}:5050  (login admin@local.dev / admin)"
-echo "                   Server 'mooKIT LMS' is pre-configured (postgres/postgres)"
+echo "Stack up. Sample UI: http://localhost:8000/ui"
+echo "Public (if reverse-proxied): http://${HOST_IP}:8000/ui"
+echo "pgAdmin is disabled by default. Start with:"
+echo "  docker compose --profile ops up -d pgadmin"
+echo "Then access locally at: http://localhost:5050"
+echo "Server 'mooKIT LMS' is pre-configured (postgres/postgres)"
 echo "Health:            http://localhost:8000/health/live"

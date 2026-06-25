@@ -26,6 +26,7 @@ from pydantic import BaseModel
 
 from app.contracts.llm import LLMEvent, LLMProvider
 from app.llm.events import ModelRefusal, OutputTruncated
+from app.obs.langfuse_context import get_langfuse_context
 
 
 class StreamTranslator:
@@ -168,6 +169,7 @@ class OpenAIProvider(LLMProvider):
             kwargs["prompt_cache_key"] = prompt_cache_key
         if temperature is not None:
             kwargs["temperature"] = temperature
+        self._attach_langfuse_metadata(kwargs, operation="responses_stream")
 
         translator = StreamTranslator()
         try:
@@ -197,6 +199,7 @@ class OpenAIProvider(LLMProvider):
             kwargs["prompt_cache_key"] = prompt_cache_key
         if temperature is not None:
             kwargs["temperature"] = temperature
+        self._attach_langfuse_metadata(kwargs, operation="responses_structured")
 
         response = await self._client.responses.parse(**kwargs)
 
@@ -213,6 +216,38 @@ class OpenAIProvider(LLMProvider):
         if parsed is None:
             raise OutputTruncated("no parsed output returned")
         return parsed
+
+    def _attach_langfuse_metadata(self, kwargs: dict[str, Any], *, operation: str) -> None:
+        """Attach Langfuse OpenAI integration fields when request context is present."""
+        ctx = get_langfuse_context()
+        if ctx is None:
+            return
+        tags = [f"feature:{ctx.feature}", f"operation:{operation}"]
+        meta: dict[str, Any] = kwargs.get("metadata", {})
+        if not isinstance(meta, dict):
+            meta = {}
+
+        # Langfuse OpenAI integration reads these metadata keys to enrich traces.
+        langfuse_meta = {
+            "request_id": ctx.request_id,
+            "tenant_key": ctx.tenant_key,
+            "feature": ctx.feature,
+            "operation": operation,
+        }
+        prior = meta.get("langfuse_metadata")
+        if isinstance(prior, dict):
+            langfuse_meta = {**prior, **langfuse_meta}
+
+        meta.update(
+            {
+                "langfuse_session_id": ctx.session_id,
+                "langfuse_user_id": str(ctx.user_id),
+                "langfuse_tags": tags,
+                "langfuse_metadata": langfuse_meta,
+            }
+        )
+        kwargs["metadata"] = meta
+        kwargs.setdefault("user", str(ctx.user_id))
 
 
 def _extract_refusal(response: Any) -> str | None:

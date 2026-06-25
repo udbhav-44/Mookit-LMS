@@ -12,16 +12,15 @@ import pytest
 from app.config import get_settings
 from app.core.prompts import SYSTEM_PROMPT, build_input
 from app.llm.openai import OpenAIProvider
+from app.obs.openai_client import make_async_openai_client
 
 pytestmark = pytest.mark.live
 
 
 @pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="no OPENAI_API_KEY")
 async def test_live_prose_stream() -> None:
-    from openai import AsyncOpenAI
-
     settings = get_settings()
-    client = AsyncOpenAI(api_key=settings.openai.api_key.get_secret_value())
+    client = make_async_openai_client(api_key=settings.openai.api_key.get_secret_value())
     provider = OpenAIProvider(client, default_model=settings.openai.fast_model)
 
     text_parts: list[str] = []

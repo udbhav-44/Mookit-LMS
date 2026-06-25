@@ -1,101 +1,40 @@
-"""
-Observability setup (A4.4): Langfuse traces + structured logging correlation.
+"""Observability bootstrap for Langfuse + optional OpenTelemetry."""
 
-Langfuse is the primary tracing backend for LLM cost/token attribution.
-OpenTelemetry GenAI conventions are wrapped here for forward-compatibility.
-
-Usage:
-    from app.obs.tracing import get_tracer, trace_llm_call
-
-The `request_id` from RequestContext is propagated as the trace correlation id
-through SSE events and ARQ jobs so all spans for one user turn are linked.
-"""
+from __future__ import annotations
 
 import logging
 import os
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# ── Langfuse ─────────────────────────────────────────────────────────────────
 
-_langfuse_client: Any = None
+def _langfuse_host() -> str:
+    # Langfuse docs use LANGFUSE_BASE_URL in many places; support both names.
+    return (
+        os.getenv("LANGFUSE_HOST")
+        or os.getenv("LANGFUSE_BASE_URL")
+        or "https://cloud.langfuse.com"
+    )
+
+
+def langfuse_enabled() -> bool:
+    return bool(os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"))
 
 
 def init_langfuse() -> None:
-    """Initialise the Langfuse client if credentials are available.
-
-    Fails silently — tracing is optional; the service must work without it.
-    """
-    global _langfuse_client
-    public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
-    secret_key = os.getenv("LANGFUSE_SECRET_KEY")
-    host = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
-
-    if not public_key or not secret_key:
+    """Initialize Langfuse SDK once, if credentials are present."""
+    if not langfuse_enabled():
         logger.info("Langfuse credentials not set — tracing disabled")
         return
-
+    host = _langfuse_host()
     try:
-        from langfuse import Langfuse
-        _langfuse_client = Langfuse(
-            public_key=public_key,
-            secret_key=secret_key,
-            host=host,
-        )
-        logger.info("Langfuse tracing initialised (host=%s)", host)
+        # Ensure client bootstrap is attempted early so startup logs make tracing state explicit.
+        from langfuse import get_client
+
+        get_client()
+        logger.info("Langfuse tracing initialized (host=%s)", host)
     except Exception as exc:
         logger.warning("Langfuse init failed: %s", exc)
-
-
-def get_langfuse():
-    return _langfuse_client
-
-
-def create_trace(
-    request_id: str,
-    tenant_key: str,
-    user_id: int,
-    session_id: str,
-    name: str = "chat_turn",
-) -> Any:
-    """Create a Langfuse trace for one chat turn.  Returns the trace object or None."""
-    client = get_langfuse()
-    if client is None:
-        return None
-    try:
-        return client.trace(
-            id=request_id,
-            name=name,
-            user_id=str(user_id),
-            session_id=session_id,
-            metadata={"tenant_key": tenant_key},
-        )
-    except Exception as exc:
-        logger.warning("Langfuse trace creation failed: %s", exc)
-        return None
-
-
-def record_llm_generation(
-    trace: Any,
-    model: str,
-    prompt_tokens: int,
-    completion_tokens: int,
-    cost_usd: float | None,
-    name: str = "llm_call",
-) -> None:
-    """Record token usage and cost on a Langfuse trace generation span."""
-    if trace is None:
-        return
-    try:
-        trace.generation(
-            name=name,
-            model=model,
-            usage={"input": prompt_tokens, "output": completion_tokens},
-            metadata={"cost_usd": cost_usd},
-        )
-    except Exception as exc:
-        logger.warning("Langfuse generation recording failed: %s", exc)
 
 
 # ── OpenTelemetry (optional) ──────────────────────────────────────────────────
